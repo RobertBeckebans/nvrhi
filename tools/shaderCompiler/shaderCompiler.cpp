@@ -67,6 +67,7 @@ struct CompileTask
 vector<CompileTask> g_CompileTasks;
 int g_OriginalTaskCount;
 atomic<int> g_ProcessedTaskCount;
+atomic<int> g_TaskRetryCount;
 mutex g_TaskMutex;
 mutex g_ReportMutex;
 bool g_Terminate = false;
@@ -518,6 +519,7 @@ void compileThreadProc()
 			ss << buf;
 
 		int result = pclose(pipe);
+		int error = errno;
 		g_ProcessedTaskCount++;
 
 		{
@@ -538,6 +540,21 @@ void compileThreadProc()
  
 			if (result != 0 && !g_Terminate)
 			{
+				// if retries > 0 and failed to execute child process or command shell (posix only), requeue the task and try again
+				if (g_TaskRetryCount > 0 &&
+					((result == -1 && error == ECHILD)
+#ifndef WIN32
+					 || (WIFEXITED(result) && WEXITSTATUS(result) == 127)
+#endif
+					))
+				{
+					cout << "RETRY queued for " << task.shaderName << ":" << task.entryPoint << " " << task.combinedDefines << endl;
+					lock_guard<mutex> guard2(g_TaskMutex);
+					g_CompileTasks.push_back(task);
+					g_ProcessedTaskCount--;
+					g_TaskRetryCount--;
+					continue;
+				}
 				cout << "ERRORS for " << task.shaderName << ":" << task.entryPoint << " " << task.combinedDefines << ": " << endl;
 				cout << ss.str() << endl;
 				g_CompileSuccess = false;
@@ -603,6 +620,9 @@ int main(int argc, char** argv)
 
 	g_OriginalTaskCount = (int)g_CompileTasks.size();
 	g_ProcessedTaskCount = 0;
+
+	// Workaround for possible pclose() failures, retry a total of 10 times min up to 5% max
+	g_TaskRetryCount = max(10, g_OriginalTaskCount/20);
 
 	{
 		// Workaround for weird behavior of _popen / cmd.exe on Windows
