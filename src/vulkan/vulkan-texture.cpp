@@ -746,6 +746,13 @@ namespace nvrhi::vulkan
         texture->image = image;
         texture->managed = false;
 
+		m_Context.nameVKObject(texture->image, vk::DebugReportObjectTypeEXT::eImage, desc.debugName.c_str());
+
+		if (!desc.isVirtual)
+		{
+			m_Context.nameVKObject(texture->memory, vk::DebugReportObjectTypeEXT::eDeviceMemory, desc.debugName.c_str());
+		}
+
         return TextureHandle::Create(texture);
     }
 
