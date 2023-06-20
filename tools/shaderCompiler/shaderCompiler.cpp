@@ -315,7 +315,7 @@ bool processShaderConfig(uint32_t lineno, const string& shaderConfig)
 	if (compilerOptions.definitions.size() > 0)
 	{
 		char buf[16];
-		sprintf(buf, "_%08x", permutationHash);
+		snprintf(buf, sizeof(buf), "_%08x", permutationHash);
 		compiledPermutationName += buf;
 	}
 	compiledPermutationName += ".bin";
@@ -528,7 +528,7 @@ void compileThreadProc()
 			const char* resultCode = (result == 0) ? " OK  " : "FAIL ";
 			float progress = (float)g_ProcessedTaskCount / (float)g_OriginalTaskCount;
 
-			sprintf(buf, "[%5.1f%%] %s %s %s:%s %s", 
+			snprintf(buf, sizeof(buf), "[%5.1f%%] %s %s %s:%s %s",
 				progress * 100.f, 
 				g_PlatformName.c_str(), 
 				resultCode, 
