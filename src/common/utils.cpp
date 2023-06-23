@@ -119,7 +119,7 @@ namespace nvrhi::utils
         }
     }
 
-    void ClearDepthStencilAttachment(ICommandList* commandList, IFramebuffer* framebuffer, float depth, uint32_t stencil)
+    void ClearDepthStencilAttachment(ICommandList* commandList, IFramebuffer* framebuffer, float depth, uint8_t stencil)
     {
         const FramebufferAttachment& att = framebuffer->getDesc().depthAttachment;
         if (att.texture)

@@ -60,7 +60,7 @@ namespace nvrhi::utils
         ICommandList* commandList,
         IFramebuffer* framebuffer,
         float depth,
-        uint32_t stencil
+        uint8_t stencil
     );
 
     NVRHI_API void BuildBottomLevelAccelStruct(
