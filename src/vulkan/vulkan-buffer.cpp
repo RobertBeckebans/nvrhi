@@ -160,8 +160,6 @@ namespace nvrhi::vulkan
 
 		if (!desc.isVirtual)
 		{
-			m_Context.nameVKObject(buffer->memory, vk::DebugReportObjectTypeEXT::eDeviceMemory, desc.debugName.c_str());
-
 			if (m_Context.extensions.KHR_buffer_device_address)
 			{
 				auto addressInfo = vk::BufferDeviceAddressInfo().setBuffer(buffer->buffer);
