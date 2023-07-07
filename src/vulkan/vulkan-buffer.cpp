@@ -160,7 +160,7 @@ namespace nvrhi::vulkan
 
 		if (!desc.isVirtual)
 		{
-			if (m_Context.extensions.KHR_buffer_device_address)
+			if (m_Context.extensions.buffer_device_address)
 			{
 				auto addressInfo = vk::BufferDeviceAddressInfo().setBuffer(buffer->buffer);
 
