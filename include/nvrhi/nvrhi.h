@@ -75,7 +75,11 @@ namespace nvrhi
     static constexpr uint32_t c_MaxBindingsPerLayout = 128;
     static constexpr uint32_t c_MaxVolatileConstantBuffersPerLayout = 6;
     static constexpr uint32_t c_MaxVolatileConstantBuffers = 32;
-    static constexpr uint32_t c_MaxPushConstantSize = 128; // D3D12: root signature is 256 bytes max., Vulkan: 128 bytes of push constants guaranteed
+#if defined(__APPLE__)
+	static constexpr uint32_t c_MaxPushConstantSize = 4096; // Vulkan: MoltenVK/Metal provides 4096 bytes of push constants
+#else
+    static constexpr uint32_t c_MaxPushConstantSize =  256; // D3D12: root signature is 256 bytes max., Vulkan: 128 bytes of push constants guaranteed, but varies with platform and GPU vendor - let application check/enforce limit at runtime
+#endif
     static constexpr uint32_t c_ConstantBufferOffsetSizeAlignment = 256; // Partially bound constant buffers must have offsets aligned to this and sizes multiple of this
 
     //////////////////////////////////////////////////////////////////////////
