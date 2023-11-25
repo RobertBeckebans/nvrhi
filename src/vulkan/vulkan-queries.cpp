@@ -170,6 +170,34 @@ namespace nvrhi::vulkan
             return false;
         }
 
+#if defined(__APPLE__)
+		// this block is specific to MoltenVK on macOS, where Vulkan timestampPeriod calibration is dynamic for
+		// non-Apple GPUs, and needs to be refreshed periodically by calling vkGetPhysicalDeviceProperties().
+		// we cannot refresh timestampPeriod every query since Metal's sampleTimestamps() has overhead on macOS
+
+		static const uint32_t kAppleVendorId = 0x106b;
+
+		// refresh timestampPeriod only for non-Apple GPUs, for Apple GPUs timestampPeriod is always locked to 1.0
+		if(m_Context.physicalDeviceProperties.vendorID != kAppleVendorId)
+		{
+			static const float refreshInterval = 1.0;	// 1.0 second refresh interval (max ~4.3 sec for uint32_t)
+
+			static float previousQueryStart = 0.0;
+			const float currentScale = 1e-9f * m_Context.physicalDeviceProperties.limits.timestampPeriod;
+			const float currentQueryStart = timestamps[0] * currentScale;
+			if(currentQueryStart - previousQueryStart >= refreshInterval)
+			{
+				// periodically refresh timestampPeriod for better timestamp calibration of non-Apple GPUs on macOS
+				m_Context.physicalDeviceProperties = m_Context.physicalDevice.getProperties();
+				previousQueryStart = currentQueryStart;
+			}
+			else if(currentQueryStart < previousQueryStart)
+			{
+				// reset but don't call getProperties() when query start times wrap around the max value of uint32_t
+				previousQueryStart = currentQueryStart;
+			}
+		}
+#endif
         const auto timestampPeriod = m_Context.physicalDeviceProperties.limits.timestampPeriod; // in nanoseconds
         const float scale = 1e-9f * timestampPeriod;
 
