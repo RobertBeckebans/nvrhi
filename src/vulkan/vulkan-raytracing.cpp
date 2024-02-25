@@ -98,7 +98,7 @@ namespace nvrhi::vulkan
                 break;
             }
 
-            dstt.setVertexFormat(convertFormat(srct.vertexFormat));
+            dstt.setVertexFormat(vk::Format(convertFormat(srct.vertexFormat)));
             dstt.setVertexData(getBufferAddress(srct.vertexBuffer, srct.vertexOffset));
             dstt.setVertexStride(srct.vertexStride);
             dstt.setMaxVertex(std::max(srct.vertexCount, 1u) - 1u);
@@ -680,7 +680,7 @@ namespace nvrhi::vulkan
             }
 
             dst.setInstanceCustomIndex(src.instanceID);
-            dst.setInstanceShaderBindingTableRecordOffset(src.instanceContributionToHitGroupIndex * m_Context.rayTracingPipelineProperties.shaderGroupBaseAlignment);
+            dst.setInstanceShaderBindingTableRecordOffset(src.instanceContributionToHitGroupIndex);
             dst.setFlags(convertInstanceFlags(src.flags));
             dst.setMask(src.instanceMask);
             memcpy(dst.transform.matrix.data(), src.transform, sizeof(float) * 12);
@@ -845,7 +845,7 @@ namespace nvrhi::vulkan
         {
             m_CurrentCmdBuf->cmdBuf.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, pso->pipeline);
             m_CurrentPipelineLayout = pso->pipelineLayout;
-            m_CurrentPipelineShaderStages = convertShaderTypeToShaderStageFlagBits(ShaderType::AllRayTracing);
+            m_CurrentPushConstantsVisibility = pso->pushConstantVisibility;
         }
 
         if (arraysAreDifferent(m_CurrentRayTracingState.bindings, state.bindings) || m_AnyVolatileBufferWrites)
@@ -1024,7 +1024,7 @@ namespace nvrhi::vulkan
 
         BindingVector<vk::DescriptorSetLayout> descriptorSetLayouts;
         uint32_t pushConstantSize = 0;
-        ShaderType pushConstantVisibility = ShaderType::None;
+        pso->pushConstantVisibility = vk::ShaderStageFlagBits();
         for (const BindingLayoutHandle& _layout : desc.globalBindingLayouts)
         {
             BindingLayout* layout = checked_cast<BindingLayout*>(_layout.Get());
@@ -1037,7 +1037,7 @@ namespace nvrhi::vulkan
                     if (item.type == ResourceType::PushConstants)
                     {
                         pushConstantSize = item.size;
-                        pushConstantVisibility = layout->desc.visibility;
+                        pso->pushConstantVisibility = convertShaderTypeToShaderStageFlagBits(layout->desc.visibility);
                         // assume there's only one push constant item in all layouts -- the validation layer makes sure of that
                         break;
                     }
@@ -1048,12 +1048,11 @@ namespace nvrhi::vulkan
         auto pushConstantRange = vk::PushConstantRange()
             .setOffset(0)
             .setSize(pushConstantSize)
-            .setStageFlags(convertShaderTypeToShaderStageFlagBits(pushConstantVisibility));
+            .setStageFlags(pso->pushConstantVisibility);
 
         auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo()
             .setSetLayoutCount(uint32_t(descriptorSetLayouts.size()))
             .setPSetLayouts(descriptorSetLayouts.data())
-            .setPushConstantRangeCount(0)
             .setPushConstantRangeCount(pushConstantSize ? 1 : 0)
             .setPPushConstantRanges(&pushConstantRange);
 

@@ -222,6 +222,14 @@ namespace nvrhi::validation
             error(ss.str());
             anyErrors = true;
         }
+
+        if (d.keepInitialState && d.initialState == ResourceStates::Unknown)
+        {
+            std::stringstream ss;
+            ss << dimensionStr << " " << debugName << " has initialState = Unknown, which is incompatible with keepInitialState = true.";
+            error(ss.str());
+            anyErrors = true;
+        }
         
         if(anyErrors)
             return nullptr;
@@ -357,7 +365,7 @@ namespace nvrhi::validation
             return nullptr;
         }
 
-        if (d.isVolatile && (d.isVertexBuffer || d.isIndexBuffer || d.isDrawIndirectArgs || d.canHaveUAVs || d.isAccelStructBuildInput || d.isAccelStructStorage || d.isVirtual))
+        if (d.isVolatile && (d.isVertexBuffer || d.isIndexBuffer || d.isDrawIndirectArgs || d.canHaveUAVs || d.isAccelStructBuildInput || d.isAccelStructStorage || d.isShaderBindingTable || d.isVirtual))
         {
             std::stringstream ss;
             ss << "Buffer " << patchedDesc.debugName << " is volatile but has unsupported usage flags:";
@@ -367,6 +375,7 @@ namespace nvrhi::validation
             if (d.canHaveUAVs) ss << " CanHaveUAVs";
             if (d.isAccelStructBuildInput) ss << " IsAccelStructBuildInput";
             if (d.isAccelStructStorage) ss << " IsAccelStructStorage";
+            if (d.isShaderBindingTable) ss << " IsShaderBindingTable";
             if (d.isVirtual) ss << " IsVirtual";
             ss << "." << std::endl << "Only constant buffers can be made volatile, and volatile buffers cannot be virtual.";
             error(ss.str());
@@ -384,6 +393,14 @@ namespace nvrhi::validation
         if (d.isVirtual && !m_Device->queryFeatureSupport(Feature::VirtualResources))
         {
             error("The device does not support virtual resources");
+            return nullptr;
+        }
+
+        if (d.keepInitialState && d.initialState == ResourceStates::Unknown)
+        {
+            std::stringstream ss;
+            ss << "Buffer " << patchedDesc.debugName << " has initialState = Unknown, which is incompatible with keepInitialState = true.";
+            error(ss.str());
             return nullptr;
         }
 
@@ -736,7 +753,7 @@ namespace nvrhi::validation
         ShaderType::Pixel
     };
     
-    bool DeviceWrapper::validatePipelineBindingLayouts(const static_vector<BindingLayoutHandle, c_MaxBindingLayouts>& bindingLayouts, const std::vector<IShader*>& shaders, GraphicsAPI api) const
+    bool DeviceWrapper::validatePipelineBindingLayouts(const static_vector<BindingLayoutHandle, c_MaxBindingLayouts>& bindingLayouts, const std::vector<IShader*>& shaders) const
     {
         const int numBindingLayouts = int(bindingLayouts.size());
         bool anyErrors = false;
@@ -771,12 +788,8 @@ namespace nvrhi::validation
 
                     if (layoutDesc)
                     {
-                        if (api != GraphicsAPI::VULKAN)
-                        {
-                            // Visibility does not apply to Vulkan
-                            if (!(layoutDesc->visibility & stage))
+                        if (!(layoutDesc->visibility & stage))
                                 continue;
-                        }
 
                         if (layoutDesc->registerSpace != 0)
                         {
@@ -839,9 +852,11 @@ namespace nvrhi::validation
 
                     anyDuplicateBindings = true;
                 }
-                else
+                else if (m_Device->getGraphicsAPI() == GraphicsAPI::D3D11)
                 {
-                    // Check for overlapping layouts.
+                    // Check for overlapping layouts on DX11, because the backend implements each binding set as a single
+                    // call to a function like PSSetShaderResources. If binding sets overlap, a set with higher index
+                    // will overwrite bindings from the lower-indexed sets, even if they are on different slots.
                     // Do this only when there are no duplicates, as with duplicates the layouts will always overlap.
 
                     bool overlapSRV = false;
@@ -919,6 +934,18 @@ namespace nvrhi::validation
                     {
                         pushConstantCount++;
                         pushConstantSize = std::max(pushConstantSize, uint32_t(item.size));
+                    }
+                }
+
+                if (layoutDesc->registerSpaceIsDescriptorSet)
+                {
+                    if (uint32_t(layoutIndex) != layoutDesc->registerSpace)
+                    {
+                        std::stringstream errorStream;
+                        errorStream << "Binding layout at index " << layoutIndex << " has registerSpace = " << layoutDesc->registerSpace 
+                            << ". When BindingLayoutDesc.registerSpaceIsDescriptorSet = true, the layout index in the pipeline must match its registerSpace.";
+                        error(errorStream.str());
+                        anyErrors = true;
                     }
                 }
             }
@@ -1022,7 +1049,7 @@ namespace nvrhi::validation
             }
         }
 
-        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders, m_Device->getGraphicsAPI()))
+        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders))
             return nullptr;
 
         if (!validateRenderState(pipelineDesc.renderState, fb))
@@ -1041,7 +1068,7 @@ namespace nvrhi::validation
 
         std::vector<IShader*> shaders = { pipelineDesc.CS };
         
-        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders, m_Device->getGraphicsAPI()))
+        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders))
             return nullptr;
 
         if (!validateShaderType(ShaderType::Compute, pipelineDesc.CS->getDesc(), "createComputePipeline"))
@@ -1066,7 +1093,7 @@ namespace nvrhi::validation
             }
         }
 
-        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders, m_Device->getGraphicsAPI()))
+        if (!validatePipelineBindingLayouts(pipelineDesc.bindingLayouts, shaders))
             return nullptr;
 
         if (!validateRenderState(pipelineDesc.renderState, fb))
@@ -1151,11 +1178,13 @@ namespace nvrhi::validation
             anyErrors = true;
         }
 
-        if (m_Device->getGraphicsAPI() != GraphicsAPI::D3D12)
+        const GraphicsAPI graphicsApi = m_Device->getGraphicsAPI();
+        if (!(graphicsApi == GraphicsAPI::D3D12 || (graphicsApi == GraphicsAPI::VULKAN && desc.registerSpaceIsDescriptorSet)))
         {
             if (desc.registerSpace != 0)
             {
-                errorStream << "Binding layout registerSpace = " << desc.registerSpace << ", which is unsupported by the current backend" << std::endl;
+                errorStream << "Binding layout registerSpace = " << desc.registerSpace << ", which is unsupported by the "
+                    << utils::GraphicsAPIToString(graphicsApi) << " backend" << std::endl;
                 anyErrors = true;
             }
         }
@@ -1323,10 +1352,10 @@ namespace nvrhi::validation
         {
             IBuffer* buffer = checked_cast<IBuffer*>(binding.resourceHandle);
 
-            if (buffer == nullptr && binding.type != ResourceType::TypedBuffer_SRV && m_Device->getGraphicsAPI() != GraphicsAPI::VULKAN)
+            if (buffer == nullptr && binding.type != ResourceType::TypedBuffer_SRV && binding.type != ResourceType::TypedBuffer_UAV && m_Device->getGraphicsAPI() != GraphicsAPI::VULKAN)
             {
                 errorStream << "Null resource bindings are not allowed for buffers, unless it's a "
-                    "TypedBuffer_SRV type binding on DX11 or DX12." << std::endl;
+                    "TypedBuffer_SRV or TypedBuffer_UAV type binding on DX11 or DX12." << std::endl;
                 return false;
             }
 

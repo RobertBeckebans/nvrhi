@@ -33,7 +33,6 @@ option(NVRHI_BUILD_SHARED "Build NVRHI as a shared library (DLL or .so)" OFF)
 option(NVRHI_INSTALL "Generate install rules for NVRHI" ON)
 cmake_dependent_option(NVRHI_INSTALL_EXPORTS "Install CMake exports" OFF "NVRHI_INSTALL" OFF)
 
-option(NVRHI_WITH_SHADER_COMPILER "Build the NVRHI shader compiler executable" ON)
 option(NVRHI_WITH_VALIDATION "Build NVRHI the validation layer" ON)
 option(NVRHI_WITH_VULKAN "Build the NVRHI Vulkan backend" ON)
 option(NVRHI_WITH_RTXMU "Use RTXMU for acceleration structure management" OFF)
@@ -54,28 +53,21 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
-if (NVRHI_WITH_VULKAN)
+if (NVRHI_WITH_VULKAN AND NOT TARGET Vulkan-Headers AND NOT TARGET Vulkan::Headers)
     add_subdirectory(thirdparty/Vulkan-Headers)
 endif()
 
 if (NVRHI_WITH_RTXMU)
     if (TARGET Vulkan-Headers)
         get_target_property(RTXMU_VULKAN_INCLUDE_DIR Vulkan-Headers INTERFACE_INCLUDE_DIRECTORIES)
+    elseif (TARGET Vulkan::Headers)
+        get_target_property(RTXMU_VULKAN_INCLUDE_DIR Vulkan::Headers INTERFACE_INCLUDE_DIRECTORIES)
     endif()
 
     option(RTXMU_WITH_VULKAN "" ${NVRHI_WITH_VULKAN})
     option(RTXMU_WITH_D3D12 "" ${NVRHI_WITH_DX12})
 
     add_subdirectory(rtxmu)
-endif()
-
-if (NVRHI_WITH_SHADER_COMPILER)
-    option(CXXOPTS_BUILD_EXAMPLES OFF)
-    option(CXXOPTS_BUILD_TESTS OFF)
-    option(CXXOPTS_ENABLE_INSTALL OFF)
-    add_subdirectory(thirdparty/cxxopts)
-
-    add_subdirectory(tools/shaderCompiler)
 endif()
 
 if (NVRHI_WITH_NVAPI AND NOT TARGET nvapi)
@@ -98,7 +90,6 @@ set(include_common
 set(src_common
     src/common/format-info.cpp
     src/common/misc.cpp
-    src/common/shader-blob.cpp
     src/common/state-tracking.cpp
     src/common/state-tracking.h
     src/common/utils.cpp)
@@ -237,10 +228,10 @@ if (NVRHI_WITH_DX11)
         target_include_directories(${nvrhi_d3d11_target} PRIVATE include)
     endif()
 
-    target_link_libraries(${nvrhi_d3d11_target} d3d11 dxguid)
+    target_link_libraries(${nvrhi_d3d11_target} PUBLIC d3d11 dxguid)
 
     if (NVRHI_WITH_NVAPI)
-        target_link_libraries(${nvrhi_d3d11_target} nvapi)
+        target_link_libraries(${nvrhi_d3d11_target} PUBLIC nvapi)
         target_compile_definitions(${nvrhi_d3d11_target} PRIVATE NVRHI_D3D11_WITH_NVAPI=1)
     else()
         target_compile_definitions(${nvrhi_d3d11_target} PRIVATE NVRHI_D3D11_WITH_NVAPI=0)
@@ -267,13 +258,13 @@ if (NVRHI_WITH_DX12)
 
     if (NVRHI_WITH_RTXMU)
         target_compile_definitions(${nvrhi_d3d12_target} PUBLIC NVRHI_WITH_RTXMU=1)
-        target_link_libraries(${nvrhi_d3d12_target} rtxmu)
+        target_link_libraries(${nvrhi_d3d12_target} PUBLIC rtxmu)
     endif()
 
-    target_link_libraries(${nvrhi_d3d12_target} d3d12 dxguid)
+    target_link_libraries(${nvrhi_d3d12_target} PUBLIC d3d12 dxguid)
 
     if (NVRHI_WITH_NVAPI)
-        target_link_libraries(${nvrhi_d3d12_target} nvapi)
+        target_link_libraries(${nvrhi_d3d12_target} PUBLIC nvapi)
         target_compile_definitions(${nvrhi_d3d12_target} PRIVATE NVRHI_D3D12_WITH_NVAPI=1)
     else()
         target_compile_definitions(${nvrhi_d3d12_target} PRIVATE NVRHI_D3D12_WITH_NVAPI=0)
@@ -297,13 +288,22 @@ if (NVRHI_WITH_VULKAN)
         set_target_properties(${nvrhi_vulkan_target} PROPERTIES FOLDER "NVRHI")
         target_include_directories(${nvrhi_vulkan_target} PRIVATE include)
     endif()
+    
+    if(WIN32)
+        target_compile_definitions(${nvrhi_vulkan_target} PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+        target_compile_definitions(${nvrhi_vulkan_target} PRIVATE NOMINMAX)
+    endif()
 
     if (NVRHI_WITH_RTXMU)
         target_compile_definitions(${nvrhi_vulkan_target} PUBLIC NVRHI_WITH_RTXMU=1)
-        target_link_libraries(${nvrhi_vulkan_target} rtxmu)
+        target_link_libraries(${nvrhi_vulkan_target} PUBLIC rtxmu)
     endif()
 
-    target_link_libraries(${nvrhi_vulkan_target} Vulkan-Headers)
+    if (TARGET Vulkan-Headers)
+        target_link_libraries(${nvrhi_vulkan_target} PRIVATE Vulkan-Headers)
+    elseif (TARGET Vulkan::Headers)
+        target_link_libraries(${nvrhi_vulkan_target} PRIVATE Vulkan::Headers)
+    endif()
 
 endif()
 
