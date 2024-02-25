@@ -1,3 +1,5 @@
+## **NOTE:** this repository contains NVRHI with RBDOOM specific changes
+
 # NVRHI
 
 [![Build Status](https://github.com/NVIDIAGameWorks/nvrhi/actions/workflows/build.yml/badge.svg)](https://github.com/NVIDIAGameWorks/nvrhi/actions/workflows/build.yml)
