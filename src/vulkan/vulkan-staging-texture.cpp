@@ -39,10 +39,10 @@ namespace nvrhi::vulkan
     {
         const FormatInfo& formatInfo = getFormatInfo(desc.format);
 
-        auto wInBlocks = (desc.width >> mipLevel) / formatInfo.blockSize;
-        auto hInBlocks = (desc.height >> mipLevel) / formatInfo.blockSize;
+        auto wInBlocks = std::max(((desc.width >> mipLevel) + formatInfo.blockSize - 1) / formatInfo.blockSize, 1u);
+        auto hInBlocks = std::max(((desc.height >> mipLevel) + formatInfo.blockSize - 1) / formatInfo.blockSize, 1u);
 
-        auto blockPitchBytes = (wInBlocks >> mipLevel) * formatInfo.bytesPerBlock;
+        auto blockPitchBytes = wInBlocks * formatInfo.bytesPerBlock;
         return blockPitchBytes * hInBlocks;
     }
 
@@ -81,8 +81,8 @@ namespace nvrhi::vulkan
         {
             assert(arraySlice == 0);
             assert(z == 0);
-            assert(sliceRegions.size() == 1);
-            return sliceRegions[0];
+            assert(sliceRegions.size() == desc.mipLevels);
+            return sliceRegions[mipLevel];
         }
     }
 
@@ -176,13 +176,9 @@ namespace nvrhi::vulkan
         auto resolvedSrcSlice = srcSlice.resolve(src->desc);
 
         assert(resolvedDstSlice.depth == 1);
-
-        vk::Extent3D srcMipSize = src->imageInfo.extent;
-        srcMipSize.width = std::max(srcMipSize.width >> resolvedDstSlice.mipLevel, 1u);
-        srcMipSize.height = std::max(srcMipSize.height >> resolvedDstSlice.mipLevel, 1u);
-
+        
         auto dstRegion = dst->getSliceRegion(resolvedDstSlice.mipLevel, resolvedDstSlice.arraySlice, resolvedDstSlice.z);
-        assert((dstRegion.offset % 0x3) == 0); // per Vulkan spec
+        assert((dstRegion.offset & 0x3) == 0); // per Vulkan spec
 
         TextureSubresourceSet srcSubresource = TextureSubresourceSet(
             resolvedSrcSlice.mipLevel, 1,
@@ -199,7 +195,7 @@ namespace nvrhi::vulkan
                                                     .setBaseArrayLayer(resolvedSrcSlice.arraySlice)
                                                     .setLayerCount(1))
                             .setImageOffset(vk::Offset3D(resolvedSrcSlice.x, resolvedSrcSlice.y, resolvedSrcSlice.z))
-                            .setImageExtent(srcMipSize);
+                            .setImageExtent(vk::Extent3D(resolvedSrcSlice.width, resolvedSrcSlice.height, resolvedSrcSlice.depth));
 
         assert(m_CurrentCmdBuf);
 
@@ -225,11 +221,7 @@ namespace nvrhi::vulkan
 
         auto resolvedDstSlice = dstSlice.resolve(dst->desc);
         auto resolvedSrcSlice = srcSlice.resolve(src->desc);
-
-        vk::Extent3D dstMipSize = dst->imageInfo.extent;
-        dstMipSize.width = std::max(dstMipSize.width >> resolvedDstSlice.mipLevel, 1u);
-        dstMipSize.height = std::max(dstMipSize.height >> resolvedDstSlice.mipLevel, 1u);
-
+        
         auto srcRegion = src->getSliceRegion(resolvedSrcSlice.mipLevel, resolvedSrcSlice.arraySlice, resolvedSrcSlice.z);
 
         assert((srcRegion.offset & 0x3) == 0); // per vulkan spec
@@ -252,7 +244,7 @@ namespace nvrhi::vulkan
                                                     .setBaseArrayLayer(resolvedDstSlice.arraySlice)
                                                     .setLayerCount(1))
                             .setImageOffset(dstOffset)
-                            .setImageExtent(dstMipSize);
+                            .setImageExtent(vk::Extent3D(resolvedDstSlice.width, resolvedDstSlice.height, resolvedDstSlice.depth));
 
         assert(m_CurrentCmdBuf);
 

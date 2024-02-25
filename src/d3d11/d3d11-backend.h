@@ -68,6 +68,7 @@ namespace nvrhi::d3d11
     public:
         TextureDesc desc;
         RefCountPtr<ID3D11Resource> resource;
+        HANDLE sharedHandle = nullptr;
 
         Texture(const Context& context) : m_Context(context) { }
         const TextureDesc& getDesc() const override { return desc; }
@@ -102,6 +103,7 @@ namespace nvrhi::d3d11
     public:
         BufferDesc desc;
         RefCountPtr<ID3D11Buffer> resource;
+        HANDLE sharedHandle = nullptr;
         
         Buffer(const Context& context) : m_Context(context) { }
         const BufferDesc& getDesc() const override { return desc; }
@@ -207,7 +209,6 @@ namespace nvrhi::d3d11
 
         ID3D11BlendState *pBlendState = nullptr;
         ID3D11DepthStencilState *pDepthStencilState = nullptr;
-        UINT stencilRef = 0;
         bool requiresBlendFactor = false;
         bool pixelShaderHasUAVs = false;
 
@@ -385,6 +386,7 @@ namespace nvrhi::d3d11
         SinglePassStereoState m_CurrentSinglePassStereoState{};
         BufferHandle m_CurrentIndirectBuffer;
         Color m_CurrentBlendConstantColor{};
+        uint8_t m_CurrentStencilRefValue = 0;
         bool m_CurrentGraphicsStateValid = false;
         bool m_CurrentComputeStateValid = false;
 

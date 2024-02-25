@@ -51,6 +51,11 @@ namespace
 #if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
                 NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_TRIANGLES_DESC ommTriangles;
 #endif
+#if NVRHI_WITH_NVAPI_DISPLACEMENT_MICROMAP
+                // Note: this union member is currently only used to pad the structure so that it's the same size as NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX.
+                // There is no support for Displacement Micro Maps in NVRHI API yet.
+                NVAPI_D3D12_RAYTRACING_GEOMETRY_DMM_TRIANGLES_DESC dmmTriangles;
+#endif
             };
         } m_data;
     public:
@@ -61,22 +66,36 @@ namespace
                 constexpr size_t kSize = sizeof(D3D12_RAYTRACING_GEOMETRY_TYPE) + sizeof(D3D12_RAYTRACING_GEOMETRY_FLAGS) + std::max(sizeof(D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC), sizeof(D3D12_RAYTRACING_GEOMETRY_AABBS_DESC));
                 static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_DESC) == kSize);
                 static_assert(offsetof(D3D12_RAYTRACING_GEOMETRY_DESC, Type) == offsetof(RaytracingGeometryDesc, type));
+                static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_DESC::Type) == sizeof(RaytracingGeometryDesc::type));
                 static_assert(offsetof(D3D12_RAYTRACING_GEOMETRY_DESC, Flags) == offsetof(RaytracingGeometryDesc, flags));
+                static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_DESC::Flags) == sizeof(RaytracingGeometryDesc::flags));
                 static_assert(offsetof(D3D12_RAYTRACING_GEOMETRY_DESC, Triangles) == offsetof(RaytracingGeometryDesc, triangles));
+                static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_DESC::Triangles) == sizeof(RaytracingGeometryDesc::triangles));
                 static_assert(offsetof(D3D12_RAYTRACING_GEOMETRY_DESC, AABBs) == offsetof(RaytracingGeometryDesc, aabbs));
+                static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_DESC::AABBs) == sizeof(RaytracingGeometryDesc::aabbs));
             }
-#if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
             {
-                constexpr size_t kUnionSize = std::max(std::max(sizeof(D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC), sizeof(D3D12_RAYTRACING_GEOMETRY_AABBS_DESC)), sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_TRIANGLES_DESC));
-                constexpr size_t kSize = sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_TYPE_EX) + sizeof(D3D12_RAYTRACING_GEOMETRY_FLAGS) + kUnionSize;
-                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX) == kSize);
+#if NVRHI_WITH_NVAPI_OPACITY_MICROMAP || NVRHI_WITH_NVAPI_DISPLACEMENT_MICROMAP
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX) == sizeof(RaytracingGeometryDesc));
                 static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, type) == offsetof(RaytracingGeometryDesc, type));
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::type) == sizeof(RaytracingGeometryDesc::type));
                 static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, flags) == offsetof(RaytracingGeometryDesc, flags));
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::flags) == sizeof(RaytracingGeometryDesc::flags));
                 static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, triangles) == offsetof(RaytracingGeometryDesc, triangles));
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::triangles) == sizeof(RaytracingGeometryDesc::triangles));
                 static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, aabbs) == offsetof(RaytracingGeometryDesc, aabbs));
-                static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, ommTriangles) == offsetof(RaytracingGeometryDesc, ommTriangles));
-            }
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::aabbs) == sizeof(RaytracingGeometryDesc::aabbs));
 #endif
+
+#if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
+                static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, ommTriangles) == offsetof(RaytracingGeometryDesc, ommTriangles));
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::ommTriangles) == sizeof(RaytracingGeometryDesc::ommTriangles));
+#endif
+#if NVRHI_WITH_NVAPI_DISPLACEMENT_MICROMAP
+                static_assert(offsetof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX, dmmTriangles) == offsetof(RaytracingGeometryDesc, dmmTriangles));
+                static_assert(sizeof(NVAPI_D3D12_RAYTRACING_GEOMETRY_DESC_EX::dmmTriangles) == sizeof(RaytracingGeometryDesc::dmmTriangles));
+#endif
+            }
         }
 
         void SetFlags(D3D12_RAYTRACING_GEOMETRY_FLAGS flags) {
@@ -449,28 +468,28 @@ namespace nvrhi::d3d12
     }
 
 #if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
-    static void fillOmmAttachmentDesc(NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_ATTACHMENT_DESC& oomAttachment, const rt::GeometryDesc& geometryDesc)
+    static void fillOmmAttachmentDesc(NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_ATTACHMENT_DESC& ommAttachment, const rt::GeometryDesc& geometryDesc)
     {
         const auto& triangles = geometryDesc.geometryData.triangles;
 
         // There's currently a bug that disables VMs if the input buffer is null.
         // just assign 128 in case it's null and index buffer is set.
-        oomAttachment.opacityMicromapArray = triangles.opacityMicromap == nullptr ? 128 : checked_cast<OpacityMicromap*>(triangles.opacityMicromap)->getDeviceAddress();
-        oomAttachment.opacityMicromapBaseLocation = 0;
-        oomAttachment.opacityMicromapIndexBuffer.StartAddress = triangles.ommIndexBuffer == nullptr ? 0 : checked_cast<Buffer*>(triangles.ommIndexBuffer)->gpuVA + triangles.ommIndexBufferOffset;
-        oomAttachment.opacityMicromapIndexBuffer.StrideInBytes = triangles.ommIndexFormat == Format::R32_UINT ? 4 : 2;
-        oomAttachment.opacityMicromapIndexFormat = getDxgiFormatMapping(triangles.ommIndexFormat).srvFormat;
+        ommAttachment.opacityMicromapArray = triangles.opacityMicromap == nullptr ? 128 : checked_cast<OpacityMicromap*>(triangles.opacityMicromap)->getDeviceAddress();
+        ommAttachment.opacityMicromapBaseLocation = 0;
+        ommAttachment.opacityMicromapIndexBuffer.StartAddress = triangles.ommIndexBuffer == nullptr ? 0 : checked_cast<Buffer*>(triangles.ommIndexBuffer)->gpuVA + triangles.ommIndexBufferOffset;
+        ommAttachment.opacityMicromapIndexBuffer.StrideInBytes = triangles.ommIndexFormat == Format::R32_UINT ? 4 : 2;
+        ommAttachment.opacityMicromapIndexFormat = getDxgiFormatMapping(triangles.ommIndexFormat).srvFormat;
 
         if (triangles.pOmmUsageCounts)
         {
 			assert(triangles.opacityMicromap);
-            oomAttachment.pOMMUsageCounts = CastToUsageCount(triangles.pOmmUsageCounts);
-            oomAttachment.numOMMUsageCounts = triangles.numOmmUsageCounts;
+            ommAttachment.pOMMUsageCounts = CastToUsageCount(triangles.pOmmUsageCounts);
+            ommAttachment.numOMMUsageCounts = triangles.numOmmUsageCounts;
         }
         else
         {
-            oomAttachment.pOMMUsageCounts = nullptr;
-            oomAttachment.numOMMUsageCounts = 0;
+            ommAttachment.pOMMUsageCounts = nullptr;
+            ommAttachment.numOMMUsageCounts = 0;
         }
     }
 #endif
@@ -484,10 +503,10 @@ namespace nvrhi::d3d12
             const auto& triangles = geometryDesc.geometryData.triangles;
             if (triangles.opacityMicromap != nullptr || triangles.ommIndexBuffer != nullptr) {
 #if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
-                NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_TRIANGLES_DESC oomTriangles = {};
-                fillD3dGeometryTrianglesDesc(oomTriangles.triangles, geometryDesc, transform4x4);
-                fillOmmAttachmentDesc(oomTriangles.ommAttachment, geometryDesc);
-                outD3dGeometryDesc.SetOMMTriangles(oomTriangles);
+                NVAPI_D3D12_RAYTRACING_GEOMETRY_OMM_TRIANGLES_DESC ommTriangles = {};
+                fillD3dGeometryTrianglesDesc(ommTriangles.triangles, geometryDesc, transform4x4);
+                fillOmmAttachmentDesc(ommTriangles.ommAttachment, geometryDesc);
+                outD3dGeometryDesc.SetOMMTriangles(ommTriangles);
 #else
                 utils::NotSupported();
 #endif
@@ -571,7 +590,7 @@ namespace nvrhi::d3d12
             om->dataBuffer = checked_cast<Buffer*>(buffer.Get());
             assert((om->dataBuffer->gpuVA % NVAPI_D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT) == 0);
         }
-        return om;
+        return rt::OpacityMicromapHandle::Create(om);
 #else
         utils::NotSupported();
         return nullptr;
@@ -683,6 +702,30 @@ namespace nvrhi::d3d12
         srvDesc.RaytracingAccelerationStructure.Location = dataBuffer->gpuVA;
 
         m_Context.device->CreateShaderResourceView(nullptr, &srvDesc, { descriptor });
+    }
+
+    bool Device::setHlslExtensionsUAV(uint32_t slot)
+    {
+#if NVRHI_D3D12_WITH_NVAPI
+        if (GetNvapiIsInitialized())
+        {
+            NvAPI_Status status = NvAPI_D3D12_SetNvShaderExtnSlotSpaceLocalThread(m_Context.device.Get(), slot, 0);
+            if (status != S_OK)
+            {
+                m_Context.error("Failed to set NvAPI_D3D12_SetNvShaderExtnSlotSpaceLocalThread");
+                return false;
+            }
+            return true;
+        }
+        else
+        {
+            m_Context.error("HLSL extensions require an NVIDIA graphics device with NVAPI support");
+        }
+#else
+        (void)slot;
+        m_Context.error("This version of NVRHI does not support NVIDIA HLSL extensions, please rebuild with NVAPI.");
+#endif
+        return false;
     }
 
 #define NEW_ON_STACK(T) (T*)alloca(sizeof(T))
@@ -971,12 +1014,28 @@ namespace nvrhi::d3d12
         pipelineDesc.NumSubobjects = static_cast<UINT>(d3dSubobjects.size());
         pipelineDesc.pSubobjects = d3dSubobjects.data();
 
+        if (desc.hlslExtensionsUAV >= 0)
+        {
+            if (!setHlslExtensionsUAV(desc.hlslExtensionsUAV))
+                return nullptr;
+        }
+
         HRESULT hr = m_Context.device5->CreateStateObject(&pipelineDesc, IID_PPV_ARGS(&pso->pipelineState));
+
+        if (desc.hlslExtensionsUAV >= 0)
+        {
+            // Disable the magic UAV slot - do it before the test for successful pipeline creation below
+            // to avoid leaving the slot set when there's an error in the pipeline.
+            if (!setHlslExtensionsUAV(0xFFFFFFFF))
+                return nullptr;
+        }
+
         if (FAILED(hr))
         {
             m_Context.error("Failed to create a DXR pipeline state object");
             return nullptr;
         }
+
 
         hr = pso->pipelineState->QueryInterface(IID_PPV_ARGS(&pso->pipelineInfo));
         if (FAILED(hr))

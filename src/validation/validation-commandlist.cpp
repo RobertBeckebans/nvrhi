@@ -388,7 +388,11 @@ namespace nvrhi::validation
             anyErrors = true;
         }
 
-        if (dstDesc.width >> dstSR.baseMipLevel != srcDesc.width >> srcSR.baseMipLevel || dstDesc.height >> dstSR.baseMipLevel != srcDesc.height >> srcSR.baseMipLevel)
+        const uint32_t srcMipWidth = std::max(srcDesc.width >> srcSR.baseMipLevel, 1u);
+        const uint32_t srcMipHeight = std::max(srcDesc.height >> srcSR.baseMipLevel, 1u);
+        const uint32_t dstMipWidth = std::max(dstDesc.width >> dstSR.baseMipLevel, 1u);
+        const uint32_t dstMipHeight = std::max(dstDesc.height >> dstSR.baseMipLevel, 1u);
+        if (srcMipWidth != dstMipWidth || srcMipHeight != dstMipHeight)
         {
             error("resolveTexture: referenced mip levels of source and destination textures must have the same dimensions");
             anyErrors = true;
@@ -585,12 +589,18 @@ namespace nvrhi::validation
 
             if (!vb.buffer)
             {
-                ss << "Vertex buffer in slot " << index << " is NULL." << std::endl;
+                ss << "Vertex buffer at index " << index << " is NULL." << std::endl;
                 anyErrors = true;
             }
             else if (!vb.buffer->getDesc().isVertexBuffer)
             {
                 ss << "Buffer '" << utils::DebugNameToString(vb.buffer->getDesc().debugName) << "' bound to vertex buffer slot " << index << " cannot be used as a vertex buffer because it does not have the isVertexBuffer flag set." << std::endl;
+                anyErrors = true;
+            }
+
+            if (vb.slot >= c_MaxVertexAttributes)
+            {
+                ss << "Vertex buffer binding at index " << index << " uses an invalid slot " << vb.slot << "." << std::endl;
                 anyErrors = true;
             }
         }

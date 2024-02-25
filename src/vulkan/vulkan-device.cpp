@@ -38,9 +38,7 @@ namespace nvrhi::vulkan
         const vk::DynamicLoader dl;
         const PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr =   // NOLINT(misc-misplaced-const)
             dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
-        VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
-        VULKAN_HPP_DEFAULT_DISPATCHER.init(desc.instance);
-        VULKAN_HPP_DEFAULT_DISPATCHER.init(desc.device);
+        VULKAN_HPP_DEFAULT_DISPATCHER.init(desc.instance, vkGetInstanceProcAddr, desc.device);
 #endif
 
         Device* device = new Device(desc);
@@ -48,7 +46,7 @@ namespace nvrhi::vulkan
     }
         
     Device::Device(const DeviceDesc& desc)
-        : m_Context(desc.instance, desc.physicalDevice, desc.device, desc.allocationCallbacks)
+        : m_Context(desc.instance, desc.physicalDevice, desc.device, reinterpret_cast<vk::AllocationCallbacks*>(desc.allocationCallbacks))
         , m_Allocator(m_Context)
         , m_TimerQueryAllocator(desc.maxTimerQueries, true)
     {
@@ -84,6 +82,7 @@ namespace nvrhi::vulkan
             { VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME, &m_Context.extensions.EXT_conservative_rasterization},
             { VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME, &m_Context.extensions.KHR_fragment_shading_rate },
             { VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME, &m_Context.extensions.EXT_opacity_micromap },
+            { VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME, &m_Context.extensions.NV_ray_tracing_invocation_reorder },
         };
 
         // parse the extension/layer lists and figure out which extensions are enabled
@@ -115,6 +114,8 @@ namespace nvrhi::vulkan
         vk::PhysicalDeviceConservativeRasterizationPropertiesEXT conservativeRasterizationProperties;
         vk::PhysicalDeviceFragmentShadingRatePropertiesKHR shadingRateProperties;
         vk::PhysicalDeviceOpacityMicromapPropertiesEXT opacityMicromapProperties;
+        vk::PhysicalDeviceRayTracingInvocationReorderPropertiesNV nvRayTracingInvocationReorderProperties;
+        
         vk::PhysicalDeviceProperties2 deviceProperties2;
 
         if (m_Context.extensions.KHR_acceleration_structure)
@@ -147,6 +148,12 @@ namespace nvrhi::vulkan
             pNext = &opacityMicromapProperties;
         }
 
+        if (m_Context.extensions.NV_ray_tracing_invocation_reorder)
+        {
+            nvRayTracingInvocationReorderProperties.pNext = pNext;
+            pNext = &nvRayTracingInvocationReorderProperties;
+        }
+
         deviceProperties2.pNext = pNext;
 
         m_Context.physicalDevice.getProperties2(&deviceProperties2);
@@ -157,6 +164,7 @@ namespace nvrhi::vulkan
         m_Context.conservativeRasterizationProperties = conservativeRasterizationProperties;
         m_Context.shadingRateProperties = shadingRateProperties;
         m_Context.opacityMicromapProperties = opacityMicromapProperties;
+        m_Context.nvRayTracingInvocationReorderProperties = nvRayTracingInvocationReorderProperties;
         m_Context.messageCallback = desc.errorCB;
 
         if (m_Context.extensions.EXT_opacity_micromap && !m_Context.extensions.KHR_synchronization2)
@@ -271,6 +279,14 @@ namespace nvrhi::vulkan
 #endif
         case Feature::RayQuery:
             return m_Context.extensions.KHR_ray_query;
+        case Feature::ShaderExecutionReordering:
+        {
+            if (m_Context.extensions.NV_ray_tracing_invocation_reorder)
+            {
+                return vk::RayTracingInvocationReorderModeNV::eReorder == m_Context.nvRayTracingInvocationReorderProperties.rayTracingInvocationReorderReorderingHint;
+            }
+            return false;
+        }
         case Feature::ShaderSpecializations:
             return true;
         case Feature::Meshlets:
@@ -305,10 +321,10 @@ namespace nvrhi::vulkan
 
     FormatSupport Device::queryFormatSupport(Format format)
     {
-        vk::Format vulkanFormat = convertFormat(format);
+        VkFormat vulkanFormat = convertFormat(format);
         
         vk::FormatProperties props;
-        m_Context.physicalDevice.getFormatProperties(vulkanFormat, &props);
+        m_Context.physicalDevice.getFormatProperties(vk::Format(vulkanFormat), &props);
 
         FormatSupport result = FormatSupport::None;
 
@@ -432,7 +448,7 @@ namespace nvrhi::vulkan
         {
             std::stringstream ss;
             ss << "Failed to allocate memory for Heap " << utils::DebugNameToString(d.debugName)
-                << ", VkResult = " << resultToString(res);
+                << ", VkResult = " << resultToString(VkResult(res));
 
             m_Context.error(ss.str());
 

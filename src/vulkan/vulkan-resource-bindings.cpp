@@ -384,7 +384,7 @@ namespace nvrhi::vulkan
 
                 const auto subresource = binding.subresources.resolve(texture->desc, false);
                 const auto textureViewType = getTextureViewType(binding.format, texture->desc.format);
-                auto& view = texture->getSubresourceView(subresource, binding.dimension, textureViewType);
+                auto& view = texture->getSubresourceView(subresource, binding.dimension, binding.format, textureViewType);
 
                 auto& imageInfo = descriptorImageInfo.emplace_back();
                 imageInfo = vk::DescriptorImageInfo()
@@ -411,7 +411,7 @@ namespace nvrhi::vulkan
 
                 const auto subresource = binding.subresources.resolve(texture->desc, true);
                 const auto textureViewType = getTextureViewType(binding.format, texture->desc.format);
-                auto& view = texture->getSubresourceView(subresource, binding.dimension, textureViewType);
+                auto& view = texture->getSubresourceView(subresource, binding.dimension, binding.format, textureViewType);
 
                 auto& imageInfo = descriptorImageInfo.emplace_back();
                 imageInfo = vk::DescriptorImageInfo()
@@ -452,7 +452,7 @@ namespace nvrhi::vulkan
                 auto vkformat = nvrhi::vulkan::convertFormat(format);
                 const auto range = binding.range.resolve(buffer->desc);
 
-                uint64_t viewInfoHash = 0;
+                size_t viewInfoHash = 0;
                 nvrhi::hash_combine(viewInfoHash, range.byteOffset);
                 nvrhi::hash_combine(viewInfoHash, range.byteSize);
                 nvrhi::hash_combine(viewInfoHash, (uint64_t)vkformat);
@@ -467,7 +467,7 @@ namespace nvrhi::vulkan
                         .setBuffer(buffer->buffer)
                         .setOffset(range.byteOffset)
                         .setRange(range.byteSize)
-                        .setFormat(vkformat);
+                        .setFormat(vk::Format(vkformat));
 
                     res = m_Context.device.createBufferView(&bufferViewInfo, m_Context.allocationCallbacks, &bufferViewRef);
                     ASSERT_VK_OK(res);
@@ -729,7 +729,7 @@ namespace nvrhi::vulkan
 
                     const auto subresource = binding.subresources.resolve(texture->desc, false);
                     const auto textureViewType = getTextureViewType(binding.format, texture->desc.format);
-                    auto& view = texture->getSubresourceView(subresource, binding.dimension, textureViewType);
+                    auto& view = texture->getSubresourceView(subresource, binding.dimension, binding.format, textureViewType);
 
                     auto& imageInfo = descriptorImageInfo.emplace_back();
                     imageInfo = vk::DescriptorImageInfo()
@@ -749,7 +749,7 @@ namespace nvrhi::vulkan
 
                     const auto subresource = binding.subresources.resolve(texture->desc, true);
                     const auto textureViewType = getTextureViewType(binding.format, texture->desc.format);
-                    auto& view = texture->getSubresourceView(subresource, binding.dimension, textureViewType);
+                    auto& view = texture->getSubresourceView(subresource, binding.dimension, binding.format, textureViewType);
 
                     auto& imageInfo = descriptorImageInfo.emplace_back();
                     imageInfo = vk::DescriptorImageInfo()
@@ -771,7 +771,7 @@ namespace nvrhi::vulkan
                     auto vkformat = nvrhi::vulkan::convertFormat(binding.format);
 
                     const auto range = binding.range.resolve(buffer->desc);
-                    uint64_t viewInfoHash = 0;
+                    size_t viewInfoHash = 0;
                     nvrhi::hash_combine(viewInfoHash, range.byteOffset);
                     nvrhi::hash_combine(viewInfoHash, range.byteSize);
                     nvrhi::hash_combine(viewInfoHash, (uint64_t)vkformat);
@@ -786,7 +786,7 @@ namespace nvrhi::vulkan
                             .setBuffer(buffer->buffer)
                             .setOffset(range.byteOffset)
                             .setRange(range.byteSize)
-                            .setFormat(vkformat);
+                            .setFormat(vk::Format(vkformat));
 
                         res = m_Context.device.createBufferView(&bufferViewInfo, m_Context.allocationCallbacks, &bufferViewRef);
                         ASSERT_VK_OK(res);
