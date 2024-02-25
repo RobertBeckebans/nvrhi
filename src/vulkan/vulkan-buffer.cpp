@@ -75,6 +75,9 @@ namespace nvrhi::vulkan
         if (desc.isAccelStructStorage)
             usageFlags |= vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR;
 
+        if (desc.isShaderBindingTable)
+            usageFlags |= vk::BufferUsageFlagBits::eShaderBindingTableKHR;
+
         if (m_Context.extensions.buffer_device_address)
             usageFlags |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 
@@ -106,13 +109,22 @@ namespace nvrhi::vulkan
             // vulkan allows for <= 64kb buffer updates to be done inline via vkCmdUpdateBuffer,
             // but the data size must always be a multiple of 4
             // enlarge the buffer slightly to allow for this
-            size += size % 4;
+            size = (size + 3) & ~3ull;
         }
 
         auto bufferInfo = vk::BufferCreateInfo()
             .setSize(size)
             .setUsage(usageFlags)
             .setSharingMode(vk::SharingMode::eExclusive);
+
+#if _WIN32
+        const auto handleType = vk::ExternalMemoryHandleTypeFlagBits::eOpaqueWin32;
+#else
+        const auto handleType = vk::ExternalMemoryHandleTypeFlagBits::eOpaqueFd;
+#endif
+        vk::ExternalMemoryBufferCreateInfo externalBuffer{ handleType };
+        if (desc.sharedResourceFlags == SharedResourceFlags::Shared)
+            bufferInfo.setPNext(&externalBuffer);
 
         vk::Result res = m_Context.device.createBuffer(&bufferInfo, m_Context.allocationCallbacks, &buffer->buffer);
         CHECK_VK_FAIL(res);
@@ -137,6 +149,15 @@ namespace nvrhi::vulkan
                 auto addressInfo = vk::BufferDeviceAddressInfo().setBuffer(buffer->buffer);
 
                 buffer->deviceAddress = m_Context.device.getBufferAddress(addressInfo);
+            }
+
+            if (desc.sharedResourceFlags == SharedResourceFlags::Shared)
+            {
+#ifdef _WIN32
+                buffer->sharedHandle = m_Context.device.getMemoryWin32HandleKHR({ buffer->memory, vk::ExternalMemoryHandleTypeFlagBits::eOpaqueWin32 });
+#else
+                buffer->sharedHandle = (void*)(size_t)m_Context.device.getMemoryFdKHR({ buffer->memory, vk::ExternalMemoryHandleTypeFlagBits::eOpaqueFd });
+#endif
             }
         }
 
@@ -416,7 +437,7 @@ namespace nvrhi::vulkan
                 int64_t thisGulpSize = std::min(remaining, int64_t(commandBufferWriteLimit));
 
                 // we bloat the read size here past the incoming buffer since the transfer must be a multiple of 4; the extra garbage should never be used anywhere
-                thisGulpSize += thisGulpSize % 4;
+                thisGulpSize = (thisGulpSize + 3) & ~3ll;
                 m_CurrentCmdBuf->cmdBuf.updateBuffer(buffer->buffer, destOffsetBytes + dataSize - remaining, thisGulpSize, &base[dataSize - remaining]);
                 remaining -= thisGulpSize;
             }
@@ -498,6 +519,8 @@ namespace nvrhi::vulkan
             return Object(buffer);
         case ObjectTypes::VK_DeviceMemory:
             return Object(memory);
+        case ObjectTypes::SharedHandle:
+            return Object(sharedHandle);
         default:
             return nullptr;
         }

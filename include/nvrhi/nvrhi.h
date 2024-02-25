@@ -62,7 +62,7 @@ namespace nvrhi
 {
     // Version of the public API provided by NVRHI.
     // Increment this when any changes to the API are made.
-    static constexpr uint32_t c_HeaderVersion = 10;
+    static constexpr uint32_t c_HeaderVersion = 14;
 
     // Verifies that the version of the implementation matches the version of the header.
     // Returns true if they match. Use this when initializing apps using NVRHI as a shared library.
@@ -386,7 +386,7 @@ namespace nvrhi
 
         // D3D11: adds D3D11_RESOURCE_MISC_SHARED
         // D3D12: adds D3D12_HEAP_FLAG_SHARED
-        // Vulkan: ignored
+        // Vulkan: adds vk::ExternalMemoryImageCreateInfo and vk::ExportMemoryAllocateInfo/vk::ExternalMemoryBufferCreateInfo
         Shared              = 0x01,
 
         // D3D11: adds (D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX | D3D11_RESOURCE_MISC_SHARED_NTHANDLE)
@@ -432,6 +432,7 @@ namespace nvrhi
         ComponentMapping componentMapping;
         std::string debugName;
 
+        bool isShaderResource = true; // Note: isShaderResource is initialized to 'true' for backward compatibility
         bool isRenderTarget = false;
         bool isUAV = false;
         bool isTypeless = false;
@@ -473,6 +474,7 @@ namespace nvrhi
         constexpr TextureDesc& setUseClearValue(bool value) { useClearValue = value; return *this; }
         constexpr TextureDesc& setInitialState(ResourceStates value) { initialState = value; return *this; }
         constexpr TextureDesc& setKeepInitialState(bool value) { keepInitialState = value; return *this; }
+        constexpr TextureDesc& setSharedResourceFlags(SharedResourceFlags value) { sharedResourceFlags = value; return *this; }
     };
 
     // describes a 2D section of a single mip level + single slice of a texture
@@ -616,6 +618,7 @@ namespace nvrhi
         bool isDrawIndirectArgs = false;
         bool isAccelStructBuildInput = false;
         bool isAccelStructStorage = false;
+        bool isShaderBindingTable = false;
 
         // A dynamic/upload buffer whose contents only live in the current command list
         bool isVolatile = false;
@@ -648,6 +651,7 @@ namespace nvrhi
         constexpr BufferDesc& setIsDrawIndirectArgs(bool value) { isDrawIndirectArgs = value; return *this; }
         constexpr BufferDesc& setIsAccelStructBuildInput(bool value) { isAccelStructBuildInput = value; return *this; }
         constexpr BufferDesc& setIsAccelStructStorage(bool value) { isAccelStructStorage = value; return *this; }
+        constexpr BufferDesc& setIsShaderBindingTable(bool value) { isShaderBindingTable = value; return *this; }
         constexpr BufferDesc& setIsVolatile(bool value) { isVolatile = value; return *this; }
         constexpr BufferDesc& setIsVirtual(bool value) { isVirtual = value; return *this; }
         constexpr BufferDesc& setInitialState(ResourceStates value) { initialState = value; return *this; }
@@ -1075,6 +1079,7 @@ namespace nvrhi
         uint8_t         stencilReadMask = 0xff;
         uint8_t         stencilWriteMask = 0xff;
         uint8_t         stencilRefValue = 0;
+        bool            dynamicStencilRef = false;
         StencilOpDesc   frontFaceStencil;
         StencilOpDesc   backFaceStencil;
 
@@ -1093,6 +1098,8 @@ namespace nvrhi
         constexpr DepthStencilState& setStencilRefValue(uint8_t value) { stencilRefValue = value; return *this; }
         constexpr DepthStencilState& setFrontFaceStencil(const StencilOpDesc& value) { frontFaceStencil = value; return *this; }
         constexpr DepthStencilState& setBackFaceStencil(const StencilOpDesc& value) { backFaceStencil = value; return *this; }
+        constexpr DepthStencilState& setDynamicStencilRef(bool value) { dynamicStencilRef = value; return *this; }
+        
     };
 
     //////////////////////////////////////////////////////////////////////////
@@ -1661,7 +1668,6 @@ namespace nvrhi
     typedef static_vector<BindingLayoutItem, c_MaxBindingsPerLayout> BindingLayoutItemArray;
 
     // Describes compile-time settings for HLSL -> SPIR-V register allocation.
-    // The default values match the offsets used by the NVRHI shaderCompiler tool.
     struct VulkanBindingOffsets
     {
         uint32_t shaderResource = 0;
@@ -1679,11 +1685,24 @@ namespace nvrhi
     {
         ShaderType visibility = ShaderType::None;
         uint32_t registerSpace = 0;
+
+        // This flag controls the validation behavior for pipelines that use multiple binding layouts.
+        // - When it's set to `false`, the `registerSpace` parameter only affects the DX12 implementation,
+        //   and the validation layer will report an error when non-zero `registerSpace` is used with other APIs.
+        // - When it's set to `true`, the `registerSpace` parameter is assumed to be the same as the descriptor set
+        //   index on Vulkan. Since binding layouts and binding sets map to Vulkan descriptor sets 1:1,
+        //   that means if a pipeline is using multiple binding layouts, layout 0 must have `registerSpace = 0`,
+        //   layout 1 must have `registerSpace = 1` and so on. NVRHI validation layer will verify that and
+        //   report errors on pipeline creation when register spaces don't match layout indices.
+        //   The motivation for such validation is that DXC maps register spaces to Vulkan descriptor sets by default.
+        bool registerSpaceIsDescriptorSet = false;
+
         BindingLayoutItemArray bindings;
         VulkanBindingOffsets bindingOffsets;
 
         BindingLayoutDesc& setVisibility(ShaderType value) { visibility = value; return *this; }
         BindingLayoutDesc& setRegisterSpace(uint32_t value) { registerSpace = value; return *this; }
+        BindingLayoutDesc& setRegisterSpaceIsDescriptorSet(bool value) { registerSpaceIsDescriptorSet = value; return *this; }
         BindingLayoutDesc& addItem(const BindingLayoutItem& value) { bindings.push_back(value); return *this; }
         BindingLayoutDesc& setBindingOffsets(const VulkanBindingOffsets& value) { bindingOffsets = value; return *this; }
     };
@@ -2249,8 +2268,9 @@ namespace nvrhi
         IGraphicsPipeline* pipeline = nullptr;
         IFramebuffer* framebuffer = nullptr;
         ViewportState viewport;
-        Color blendConstantColor{};
         VariableRateShadingState shadingRateState;
+        Color blendConstantColor{};
+        uint8_t dynamicStencilRefValue = 0;
 
         BindingSetVector bindings;
 
@@ -2262,7 +2282,9 @@ namespace nvrhi
         GraphicsState& setPipeline(IGraphicsPipeline* value) { pipeline = value; return *this; }
         GraphicsState& setFramebuffer(IFramebuffer* value) { framebuffer = value; return *this; }
         GraphicsState& setViewport(const ViewportState& value) { viewport = value; return *this; }
+        GraphicsState& setShadingRateState(const VariableRateShadingState& value) { shadingRateState = value; return *this; }
         GraphicsState& setBlendColor(const Color& value) { blendConstantColor = value; return *this; }
+        GraphicsState& setDynamicStencilRefValue(uint8_t value) { dynamicStencilRefValue = value; return *this; }
         GraphicsState& addBindingSet(IBindingSet* value) { bindings.push_back(value); return *this; }
         GraphicsState& addVertexBuffer(const VertexBufferBinding& value) { vertexBuffers.push_back(value); return *this; }
         GraphicsState& setIndexBuffer(const IndexBufferBinding& value) { indexBuffer = value; return *this; }
@@ -2331,6 +2353,7 @@ namespace nvrhi
         IFramebuffer* framebuffer = nullptr;
         ViewportState viewport;
         Color blendConstantColor{};
+        uint8_t dynamicStencilRefValue = 0;
 
         BindingSetVector bindings;
 
@@ -2342,6 +2365,7 @@ namespace nvrhi
         MeshletState& setBlendColor(const Color& value) { blendConstantColor = value; return *this; }
         MeshletState& addBindingSet(IBindingSet* value) { bindings.push_back(value); return *this; }
         MeshletState& setIndirectParams(IBuffer* value) { indirectParams = value; return *this; }
+        MeshletState& setDynamicStencilRefValue(uint8_t value) { dynamicStencilRefValue = value; return *this; }
     };
 
     //////////////////////////////////////////////////////////////////////////
@@ -2386,6 +2410,7 @@ namespace nvrhi
             uint32_t maxPayloadSize = 0;
             uint32_t maxAttributeSize = sizeof(float) * 2; // typical case: float2 uv;
             uint32_t maxRecursionDepth = 1;
+            int32_t hlslExtensionsUAV = -1;
 
             PipelineDesc& addShader(const PipelineShaderDesc& value) { shaders.push_back(value); return *this; }
             PipelineDesc& addHitGroup(const PipelineHitGroupDesc& value) { hitGroups.push_back(value); return *this; }
@@ -2393,6 +2418,7 @@ namespace nvrhi
             PipelineDesc& setMaxPayloadSize(uint32_t value) { maxPayloadSize = value; return *this; }
             PipelineDesc& setMaxAttributeSize(uint32_t value) { maxAttributeSize = value; return *this; }
             PipelineDesc& setMaxRecursionDepth(uint32_t value) { maxRecursionDepth = value; return *this; }
+            PipelineDesc& setHlslExtensionsUAV(int32_t value) { hlslExtensionsUAV = value; return *this; }
         };
 
         class IPipeline;
@@ -2456,6 +2482,7 @@ namespace nvrhi
         RayTracingPipeline,
         RayTracingOpacityMicromap,
         RayQuery,
+        ShaderExecutionReordering,
         FastGeometryShader,
         Meshlets,
         ConservativeRasterization,

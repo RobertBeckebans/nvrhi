@@ -29,6 +29,9 @@
 #include <mutex>
 #include <list>
 
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
+#include <vulkan/vulkan.hpp>
+
 #ifdef NVRHI_WITH_RTXMU
 #include <rtxmu/VkAccelStructManager.h>
 #endif
@@ -167,6 +170,7 @@ namespace nvrhi::vulkan
             bool KHR_fragment_shading_rate = false;
             bool EXT_conservative_rasterization = false;
             bool EXT_opacity_micromap = false;
+            bool NV_ray_tracing_invocation_reorder = false;
         } extensions;
 
         vk::PhysicalDeviceProperties physicalDeviceProperties;
@@ -175,6 +179,7 @@ namespace nvrhi::vulkan
         vk::PhysicalDeviceConservativeRasterizationPropertiesEXT conservativeRasterizationProperties;
         vk::PhysicalDeviceFragmentShadingRatePropertiesKHR shadingRateProperties;
         vk::PhysicalDeviceOpacityMicromapPropertiesEXT opacityMicromapProperties;
+        vk::PhysicalDeviceRayTracingInvocationReorderPropertiesNV nvRayTracingInvocationReorderProperties;
         vk::PhysicalDeviceFragmentShadingRateFeaturesKHR shadingRateFeatures;
         IMessageCallback* messageCallback = nullptr;
 #ifdef NVRHI_WITH_RTXMU
@@ -298,7 +303,10 @@ namespace nvrhi::vulkan
         vk::Result allocateMemory(MemoryResource* res,
             vk::MemoryRequirements memRequirements,
             vk::MemoryPropertyFlags memPropertyFlags,
-            bool enableDeviceAddress = false) const;
+            bool enableDeviceAddress = false,
+            bool enableExportMemory = false,
+            VkImage dedicatedImage = nullptr,
+            VkBuffer dedicatedBuffer = nullptr) const;
         void freeMemory(MemoryResource* res) const;
 
     private:
@@ -360,9 +368,9 @@ namespace nvrhi::vulkan
 
         struct Hash
         {
-            std::size_t operator()(std::tuple<TextureSubresourceSet, TextureSubresourceViewType, TextureDimension> const& s) const noexcept
+            std::size_t operator()(std::tuple<TextureSubresourceSet, TextureSubresourceViewType, TextureDimension, Format> const& s) const noexcept
             {
-                const auto& [subresources, viewType, dimension] = s;
+                const auto& [subresources, viewType, dimension, format] = s;
 
                 size_t hash = 0;
 
@@ -372,6 +380,7 @@ namespace nvrhi::vulkan
                 hash_combine(hash, subresources.numArraySlices);
                 hash_combine(hash, viewType);
                 hash_combine(hash, dimension);
+                hash_combine(hash, format);
 
                 return hash;
             }
@@ -381,13 +390,16 @@ namespace nvrhi::vulkan
         TextureDesc desc;
 
         vk::ImageCreateInfo imageInfo;
+        vk::ExternalMemoryImageCreateInfo externalMemoryImageInfo;
         vk::Image image;
 
         HeapHandle heap;
+
+        void* sharedHandle = nullptr;
         
         // contains subresource views for this texture
         // note that we only create the views that the app uses, and that multiple views may map to the same subresources
-        std::unordered_map<std::tuple<TextureSubresourceSet, TextureSubresourceViewType, TextureDimension>, TextureSubresourceView, Texture::Hash> subresourceViews;
+        std::unordered_map<std::tuple<TextureSubresourceSet, TextureSubresourceViewType, TextureDimension, Format>, TextureSubresourceView, Texture::Hash> subresourceViews;
 
         Texture(const VulkanContext& context, VulkanAllocator& allocator)
             : TextureStateExtension(desc)
@@ -398,7 +410,8 @@ namespace nvrhi::vulkan
         // returns a subresource view for an arbitrary range of mip levels and array layers.
         // 'viewtype' only matters when asking for a depthstencil view; in situations where only depth or stencil can be bound
         // (such as an SRV with ImageLayout::eShaderReadOnlyOptimal), but not both, then this specifies which of the two aspect bits is to be set.
-        TextureSubresourceView& getSubresourceView(const TextureSubresourceSet& subresources, TextureDimension dimension, TextureSubresourceViewType viewtype = TextureSubresourceViewType::AllAspects);
+        TextureSubresourceView& getSubresourceView(const TextureSubresourceSet& subresources, TextureDimension dimension,
+            Format format, TextureSubresourceViewType viewtype = TextureSubresourceViewType::AllAspects);
         
         uint32_t getNumSubresources() const;
         uint32_t getSubresourceIndex(uint32_t mipLevel, uint32_t arrayLayer) const;
@@ -529,6 +542,7 @@ namespace nvrhi::vulkan
 
         std::vector<BufferVersionItem> versionTracking;
         void* mappedMemory = nullptr;
+        void* sharedHandle = nullptr;
         uint32_t versionSearchStart = 0;
 
         // For staging buffers only
@@ -802,6 +816,7 @@ namespace nvrhi::vulkan
         BindingVector<RefCountPtr<BindingLayout>> pipelineBindingLayouts;
         vk::PipelineLayout pipelineLayout;
         vk::Pipeline pipeline;
+        vk::ShaderStageFlags pushConstantVisibility;
         bool usesBlendConstants = false;
 
         explicit GraphicsPipeline(const VulkanContext& context)
@@ -825,6 +840,7 @@ namespace nvrhi::vulkan
         BindingVector<RefCountPtr<BindingLayout>> pipelineBindingLayouts;
         vk::PipelineLayout pipelineLayout;
         vk::Pipeline pipeline;
+        vk::ShaderStageFlags pushConstantVisibility;
 
         explicit ComputePipeline(const VulkanContext& context)
             : m_Context(context)
@@ -847,6 +863,7 @@ namespace nvrhi::vulkan
         BindingVector<RefCountPtr<BindingLayout>> pipelineBindingLayouts;
         vk::PipelineLayout pipelineLayout;
         vk::Pipeline pipeline;
+        vk::ShaderStageFlags pushConstantVisibility;
         bool usesBlendConstants = false;
 
         explicit MeshletPipeline(const VulkanContext& context)
@@ -869,6 +886,7 @@ namespace nvrhi::vulkan
         BindingVector<RefCountPtr<BindingLayout>> pipelineBindingLayouts;
         vk::PipelineLayout pipelineLayout;
         vk::Pipeline pipeline;
+        vk::ShaderStageFlags pushConstantVisibility;
 
         std::unordered_map<std::string, uint32_t> shaderGroups; // name -> index
         std::vector<uint8_t> shaderGroupHandles;
@@ -1107,11 +1125,11 @@ namespace nvrhi::vulkan
         IMessageCallback* getMessageCallback() override { return m_Context.messageCallback; }
 
         // vulkan::IDevice implementation
-        vk::Semaphore getQueueSemaphore(CommandQueue queue) override;
-        void queueWaitForSemaphore(CommandQueue waitQueue, vk::Semaphore semaphore, uint64_t value) override;
-        void queueSignalSemaphore(CommandQueue executionQueue, vk::Semaphore semaphore, uint64_t value) override;
+        VkSemaphore getQueueSemaphore(CommandQueue queue) override;
+        void queueWaitForSemaphore(CommandQueue waitQueue, VkSemaphore semaphore, uint64_t value) override;
+        void queueSignalSemaphore(CommandQueue executionQueue, VkSemaphore semaphore, uint64_t value) override;
         uint64_t queueGetCompletedInstance(CommandQueue queue) override;
-        FramebufferHandle createHandleForNativeFramebuffer(vk::RenderPass renderPass, vk::Framebuffer framebuffer,
+        FramebufferHandle createHandleForNativeFramebuffer(VkRenderPass renderPass, VkFramebuffer framebuffer,
             const FramebufferDesc& desc, bool transferOwnership) override;
 
     private:
@@ -1232,7 +1250,7 @@ namespace nvrhi::vulkan
         TrackedCommandBufferPtr m_CurrentCmdBuf = nullptr;
 
         vk::PipelineLayout m_CurrentPipelineLayout;
-        vk::ShaderStageFlags m_CurrentPipelineShaderStages;
+        vk::ShaderStageFlags m_CurrentPushConstantsVisibility;
         GraphicsState m_CurrentGraphicsState{};
         ComputeState m_CurrentComputeState{};
         MeshletState m_CurrentMeshletState{};

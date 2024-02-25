@@ -41,6 +41,13 @@
 #define NVRHI_WITH_NVAPI_OPACITY_MICROMAP (0)
 #endif
 
+// ... same for DMM compatible versions (>=535) we look for one of the defines it adds
+#if NVRHI_D3D12_WITH_NVAPI && defined(NVAPI_GET_RAYTRACING_DISPLACEMENT_MICROMAP_ARRAY_PREBUILD_INFO_PARAMS_VER)
+#define NVRHI_WITH_NVAPI_DISPLACEMENT_MICROMAP (1)
+#else
+#define NVRHI_WITH_NVAPI_DISPLACEMENT_MICROMAP (0)
+#endif
+
 #include <bitset>
 #include <memory>
 #include <queue>
@@ -229,6 +236,7 @@ namespace nvrhi::d3d12
         const D3D12_RESOURCE_DESC resourceDesc;
         RefCountPtr<ID3D12Resource> resource;
         uint8_t planeCount = 1;
+        HANDLE sharedHandle = nullptr;
         HeapHandle heap;
 
         Texture(const Context& context, DeviceResources& resources, TextureDesc desc, const D3D12_RESOURCE_DESC& resourceDesc)
@@ -278,6 +286,7 @@ namespace nvrhi::d3d12
 
         RefCountPtr<ID3D12Fence> lastUseFence;
         uint64_t lastUseFenceValue = 0;
+        HANDLE sharedHandle = nullptr;
 
         Buffer(const Context& context, DeviceResources& resources, BufferDesc desc)
             : BufferStateExtension(this->desc)
@@ -1117,6 +1126,8 @@ namespace nvrhi::d3d12
 
         Context& getContext() { return m_Context; }
 
+        bool setHlslExtensionsUAV(uint32_t slot);
+
         bool GetAccelStructPreBuildInfo(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO& outPreBuildInfo, const rt::AccelStructDesc& desc) const;
 
         bool GetNvapiIsInitialized() const { return m_NvapiIsInitialized; }
@@ -1139,6 +1150,7 @@ namespace nvrhi::d3d12
         bool m_MeshletsSupported = false;
         bool m_VariableRateShadingSupported = false;
         bool m_OpacityMicromapSupported = false;
+        bool m_ShaderExecutionReorderingSupported = false;
 
         D3D12_FEATURE_DATA_D3D12_OPTIONS  m_Options = {};
         D3D12_FEATURE_DATA_D3D12_OPTIONS5 m_Options5 = {};
