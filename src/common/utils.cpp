@@ -124,7 +124,11 @@ namespace nvrhi::utils
         const FramebufferAttachment& att = framebuffer->getDesc().depthAttachment;
         if (att.texture)
         {
-            commandList->clearDepthStencilTexture( att.texture, att.subresources, true, depth, true, stencil );
+            // RB: old solution for RBDoom - commandList->clearDepthStencilTexture( att.texture, att.subresources, true, depth, true, stencil );
+            
+            const FormatInfo& formatInfo = getFormatInfo(att.texture->getDesc().format);
+            commandList->clearDepthStencilTexture(att.texture, att.subresources, formatInfo.hasDepth, depth,
+                formatInfo.hasStencil, uint8_t(stencil));
         }
     }
 

@@ -444,6 +444,11 @@ namespace nvrhi::d3d12
         {
             std::wstring wname(desc.debugName.begin(), desc.debugName.end());
             resource->SetName(wname.c_str());
+#if NVRHI_WITH_AFTERMATH
+            // the driver will track the resource internally so don't need to keep the handle around
+            GFSDK_Aftermath_ResourceHandle resourceHandle = {};
+            GFSDK_Aftermath_DX12_RegisterResource(resource, &resourceHandle);
+#endif
         }
 
         if (desc.isUAV)
@@ -1178,7 +1183,7 @@ namespace nvrhi::d3d12
         {
             for (uint32_t row = 0; row < numRows; row++)
             {
-                void* destAddress = (char*)cpuVA + footprint.Footprint.RowPitch * (row + depthSlice * numRows);
+                void* destAddress = (char*)cpuVA + uint64_t(footprint.Footprint.RowPitch) * uint64_t(row + depthSlice * numRows);
                 const void* srcAddress = (const char*)data + rowPitch * row + depthPitch * depthSlice;
                 memcpy(destAddress, srcAddress, std::min(rowPitch, rowSizeInBytes));
             }
