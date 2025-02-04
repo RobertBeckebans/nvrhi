@@ -177,7 +177,7 @@ namespace nvrhi::vulkan
         buffer->desc = desc;
         buffer->managed = false;
 
-        m_Context.nameVKObject(VkBuffer(buffer->buffer), vk::DebugReportObjectTypeEXT::eBuffer, desc.debugName.c_str());
+        m_Context.nameVKObject(VkBuffer(buffer->buffer), vk::ObjectType::eBuffer, vk::DebugReportObjectTypeEXT::eBuffer, desc.debugName.c_str());
 
         if (!desc.isVirtual)
         {
