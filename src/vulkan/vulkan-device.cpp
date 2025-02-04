@@ -36,7 +36,11 @@ namespace nvrhi::vulkan
     DeviceHandle createDevice(const DeviceDesc& desc)
     {
 #if defined(NVRHI_SHARED_LIBRARY_BUILD)
-        const vk::DynamicLoader dl;
+#if VK_HEADER_VERSION >= 301
+        vk::detail::DynamicLoader dl;
+#else
+        vk::DynamicLoader dl;
+#endif
         const PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr =   // NOLINT(misc-misplaced-const)
             dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
         VULKAN_HPP_DEFAULT_DISPATCHER.init(desc.instance, vkGetInstanceProcAddr, desc.device);
@@ -71,21 +75,21 @@ namespace nvrhi::vulkan
 
         // maps Vulkan extension strings into the corresponding boolean flags in Device
         const std::unordered_map<std::string, bool*> extensionStringMap = {
-            { VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, &m_Context.extensions.KHR_synchronization2 },
-            { VK_KHR_MAINTENANCE1_EXTENSION_NAME, &m_Context.extensions.KHR_maintenance1 },
-            { VK_EXT_DEBUG_REPORT_EXTENSION_NAME, &m_Context.extensions.EXT_debug_report },
+            { VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME, &m_Context.extensions.EXT_conservative_rasterization},
             { VK_EXT_DEBUG_MARKER_EXTENSION_NAME, &m_Context.extensions.EXT_debug_marker },
+            { VK_EXT_DEBUG_REPORT_EXTENSION_NAME, &m_Context.extensions.EXT_debug_report },
+            { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, &m_Context.extensions.EXT_debug_utils },
+            { VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME, &m_Context.extensions.EXT_opacity_micromap },
             { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &m_Context.extensions.KHR_acceleration_structure },
             { VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, &m_Context.extensions.buffer_device_address },
+            { VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME, &m_Context.extensions.KHR_fragment_shading_rate },
+            { VK_KHR_MAINTENANCE1_EXTENSION_NAME, &m_Context.extensions.KHR_maintenance1 },
             { VK_KHR_RAY_QUERY_EXTENSION_NAME,&m_Context.extensions.KHR_ray_query },
             { VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &m_Context.extensions.KHR_ray_tracing_pipeline },
+            { VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, &m_Context.extensions.KHR_synchronization2 },
             { VK_NV_MESH_SHADER_EXTENSION_NAME, &m_Context.extensions.NV_mesh_shader },
-            { VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME, &m_Context.extensions.EXT_conservative_rasterization},
-            { VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME, &m_Context.extensions.KHR_fragment_shading_rate },
-            { VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME, &m_Context.extensions.EXT_opacity_micromap },
             { VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME, &m_Context.extensions.NV_ray_tracing_invocation_reorder },
 #if NVRHI_WITH_AFTERMATH
-            { VK_EXT_DEBUG_UTILS_EXTENSION_NAME, &m_Context.extensions.EXT_debug_utils },
             { VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME, &m_Context.extensions.NV_device_diagnostic_checkpoints },
             { VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME, &m_Context.extensions.NV_device_diagnostics_config }
 #endif
@@ -279,7 +283,7 @@ namespace nvrhi::vulkan
         try {
             m_Context.device.waitIdle();
         }
-        catch (vk::DeviceLostError e)
+        catch (vk::DeviceLostError&)
         {
             return false;
         }
@@ -447,6 +451,88 @@ namespace nvrhi::vulkan
         return submissionID;
     }
 
+    void Device::getTextureTiling(ITexture* _texture, uint32_t* numTiles, PackedMipDesc* desc, TileShape* tileShape, uint32_t* subresourceTilingsNum, SubresourceTiling* subresourceTilings)
+    {
+        Texture* texture = checked_cast<Texture*>(_texture);
+        uint32_t numStandardMips = 0;
+        uint32_t tileWidth = 1;
+        uint32_t tileHeight = 1;
+        uint32_t tileDepth = 1;
+
+        {
+            auto memoryRequirements = m_Context.device.getImageSparseMemoryRequirements(texture->image);
+            if (!memoryRequirements.empty())
+            {
+                numStandardMips = memoryRequirements[0].imageMipTailFirstLod;
+            }
+
+            if (desc)
+            {
+                desc->numStandardMips = numStandardMips;
+                desc->numPackedMips = texture->imageInfo.mipLevels - memoryRequirements[0].imageMipTailFirstLod;
+                desc->startTileIndexInOverallResource = (uint32_t)(memoryRequirements[0].imageMipTailOffset / texture->tileByteSize);
+                desc->numTilesForPackedMips = (uint32_t)(memoryRequirements[0].imageMipTailSize / texture->tileByteSize);
+            }
+        }
+
+        {
+            auto formatProperties = m_Context.physicalDevice.getSparseImageFormatProperties(texture->imageInfo.format, texture->imageInfo.imageType, texture->imageInfo.samples, texture->imageInfo.usage, texture->imageInfo.tiling);
+            if (!formatProperties.empty())
+            {   
+                tileWidth = formatProperties[0].imageGranularity.width;
+                tileHeight = formatProperties[0].imageGranularity.height;
+                tileDepth = formatProperties[0].imageGranularity.depth;
+            }
+
+            if (tileShape)
+            {
+                tileShape->widthInTexels = tileWidth;
+                tileShape->heightInTexels = tileHeight;
+                tileShape->depthInTexels = tileDepth;
+            }
+        }
+
+        if (subresourceTilingsNum)
+        {
+            *subresourceTilingsNum = std::min(*subresourceTilingsNum, texture->desc.mipLevels);
+            uint32_t startTileIndexInOverallResource = 0;
+
+            uint32_t width = texture->desc.width;
+            uint32_t height = texture->desc.height;
+            uint32_t depth = texture->desc.depth;
+
+            for (uint32_t i = 0; i < *subresourceTilingsNum; ++i)
+            {
+                if (i < numStandardMips)
+                {
+                    subresourceTilings[i].widthInTiles = (width + tileWidth - 1) / tileWidth;
+                    subresourceTilings[i].heightInTiles = (height + tileHeight - 1) / tileHeight;
+                    subresourceTilings[i].depthInTiles = (depth + tileDepth - 1) / tileDepth;
+                    subresourceTilings[i].startTileIndexInOverallResource = startTileIndexInOverallResource;
+                }
+                else
+                {
+                    subresourceTilings[i].widthInTiles = 0;
+                    subresourceTilings[i].heightInTiles = 0;
+                    subresourceTilings[i].depthInTiles = 0;
+                    subresourceTilings[i].startTileIndexInOverallResource = UINT32_MAX;
+                }
+
+                width = std::max(width / 2, tileWidth);
+                height = std::max(height / 2, tileHeight);
+                depth = std::max(depth / 2, tileDepth);
+
+                startTileIndexInOverallResource += subresourceTilings[i].widthInTiles * subresourceTilings[i].heightInTiles * subresourceTilings[i].depthInTiles;
+            }
+        }
+
+        if (numTiles)
+        {
+            auto memoryRequirements = m_Context.device.getImageMemoryRequirements(texture->image);
+            *numTiles = (uint32_t)(memoryRequirements.size / texture->tileByteSize);
+        }
+    }
+
     HeapHandle Device::createHeap(const HeapDesc& d)
     {
         vk::MemoryRequirements memoryRequirements;
@@ -494,7 +580,7 @@ namespace nvrhi::vulkan
 
         if (!d.debugName.empty())
         {
-            m_Context.nameVKObject(heap->memory, vk::DebugReportObjectTypeEXT::eDeviceMemory, d.debugName.c_str());
+            m_Context.nameVKObject(heap->memory, vk::ObjectType::eDeviceMemory, vk::DebugReportObjectTypeEXT::eDeviceMemory, d.debugName.c_str());
         }
 
         return HeapHandle::Create(heap);
@@ -509,27 +595,29 @@ namespace nvrhi::vulkan
         }
     }
 
-    void VulkanContext::nameVKObject(const void* handle, const vk::DebugReportObjectTypeEXT objtype, const char* name) const
+    void VulkanContext::nameVKObject(const void* handle, const vk::ObjectType objtype,
+        const vk::DebugReportObjectTypeEXT objtypeEXT, const char* name) const
     {
-        if (extensions.EXT_debug_marker && name && *name && handle)
+        if (!(name && *name && handle))
+            return;
+
+        if (extensions.EXT_debug_utils)
+        {
+            auto info = vk::DebugUtilsObjectNameInfoEXT()
+                .setObjectType(objtype)
+                .setObjectHandle(reinterpret_cast<uint64_t>(handle))
+                .setPObjectName(name);
+            device.setDebugUtilsObjectNameEXT(info);
+        }
+        else if (extensions.EXT_debug_marker)
         {
             auto info = vk::DebugMarkerObjectNameInfoEXT()
-                .setObjectType(objtype)
+                .setObjectType(objtypeEXT)
                 .setObject(reinterpret_cast<uint64_t>(handle))
                 .setPObjectName(name);
 
             (void)device.debugMarkerSetObjectNameEXT(&info);
         }
-#if NVRHI_WITH_AFTERMATH
-        if (extensions.EXT_debug_utils && name && *name)
-        {
-            auto info = vk::DebugUtilsObjectNameInfoEXT()
-                .setObjectType(vk::ObjectType::eUnknown)
-                .setObjectHandle(reinterpret_cast<uint64_t>(handle))
-                .setPObjectName(name);
-            device.setDebugUtilsObjectNameEXT(info);
-        }
-#endif
     }
 
     void VulkanContext::error(const std::string& message) const
@@ -541,5 +629,4 @@ namespace nvrhi::vulkan
     {
         messageCallback->message(MessageSeverity::Warning, message.c_str());
     }
-
 } // namespace nvrhi::vulkan

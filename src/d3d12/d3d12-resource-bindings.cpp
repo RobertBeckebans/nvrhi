@@ -285,6 +285,19 @@ namespace nvrhi::d3d12
                             found = true;
                             break;
                         }
+                        else if (range.RangeType == D3D12_DESCRIPTOR_RANGE_TYPE_UAV && bindingType == ResourceType::SamplerFeedbackTexture_UAV)
+                        {
+                            SamplerFeedbackTexture* texture = checked_cast<SamplerFeedbackTexture*>(binding.resourceHandle);
+
+                            texture->createUAV(descriptorHandle.ptr);
+                            pResource = texture;
+
+                            // TODO: Automatic state transition into Unordered Access here
+
+                            hasUavBindings = true;
+                            found = true;
+                            break;
+                        }
                     }
 
                     if (pResource)
@@ -440,6 +453,7 @@ namespace nvrhi::d3d12
                     case ResourceType::TypedBuffer_UAV:
                     case ResourceType::StructuredBuffer_UAV:
                     case ResourceType::RawBuffer_UAV:
+                    case ResourceType::SamplerFeedbackTexture_UAV:
                         range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
                         break;
 
@@ -582,6 +596,7 @@ namespace nvrhi::d3d12
             case ResourceType::TypedBuffer_UAV:
             case ResourceType::StructuredBuffer_UAV:
             case ResourceType::RawBuffer_UAV:
+            case ResourceType::SamplerFeedbackTexture_UAV:
                 rangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
                 break;
 
@@ -673,6 +688,12 @@ namespace nvrhi::d3d12
             rsDesc.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
         }
 
+        if (m_HeapDirectlyIndexedEnabled)
+        {
+            rsDesc.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
+            rsDesc.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+        }
+        
         if (!rootParameters.empty())
         {
             rsDesc.Desc_1_1.pParameters = rootParameters.data();
@@ -768,6 +789,11 @@ namespace nvrhi::d3d12
         case ResourceType::Texture_UAV: {
             Texture* texture = checked_cast<Texture*>(binding.resourceHandle);
             texture->createUAV(descriptorHandle.ptr, binding.format, binding.dimension, binding.subresources);
+            break;
+        }
+        case ResourceType::SamplerFeedbackTexture_UAV: {
+            SamplerFeedbackTexture* texture = checked_cast<SamplerFeedbackTexture*>(binding.resourceHandle);
+            texture->createUAV(descriptorHandle.ptr);
             break;
         }
         case ResourceType::TypedBuffer_SRV:

@@ -212,6 +212,9 @@ namespace nvrhi::vulkan
         if (d.isTypeless)
             flags |= vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage;
 
+        if (d.isTiled)
+            flags |= vk::ImageCreateFlagBits::eSparseBinding | vk::ImageCreateFlagBits::eSparseResidency;
+
         return flags;
     }
 
@@ -346,7 +349,7 @@ namespace nvrhi::vulkan
         ASSERT_VK_OK(res);
 
         const std::string debugName = std::string("ImageView for: ") + utils::DebugNameToString(desc.debugName);
-        m_Context.nameVKObject(VkImageView(view.view), vk::DebugReportObjectTypeEXT::eImageView, debugName.c_str());
+        m_Context.nameVKObject(VkImageView(view.view), vk::ObjectType::eImageView, vk::DebugReportObjectTypeEXT::eImageView, debugName.c_str());
 
         return view;
     }
@@ -361,7 +364,7 @@ namespace nvrhi::vulkan
         ASSERT_VK_OK(res);
         CHECK_VK_FAIL(res)
 
-        m_Context.nameVKObject(texture->image, vk::DebugReportObjectTypeEXT::eImage, desc.debugName.c_str());
+        m_Context.nameVKObject(texture->image, vk::ObjectType::eImage, vk::DebugReportObjectTypeEXT::eImage, desc.debugName.c_str());
 
         if (!desc.isVirtual)
         {
@@ -378,7 +381,7 @@ namespace nvrhi::vulkan
 #endif
             }
 
-            m_Context.nameVKObject(texture->memory, vk::DebugReportObjectTypeEXT::eDeviceMemory, desc.debugName.c_str());
+            m_Context.nameVKObject(texture->memory, vk::ObjectType::eDeviceMemory, vk::DebugReportObjectTypeEXT::eDeviceMemory, desc.debugName.c_str());
         }
 
         return TextureHandle::Create(texture);
@@ -704,6 +707,8 @@ namespace nvrhi::vulkan
             return Object(memory);
         case ObjectTypes::SharedHandle:
             return Object(sharedHandle);
+        case ObjectTypes::VK_ImageCreateInfo:
+            return Object(&imageInfo);
         default:
             return nullptr;
         }

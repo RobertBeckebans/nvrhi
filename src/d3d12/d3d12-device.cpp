@@ -38,6 +38,11 @@ namespace nvrhi::d3d12
         messageCallback->message(MessageSeverity::Error, message.c_str());
     }
 
+    void Context::info(const std::string& message) const
+    {
+        messageCallback->message(MessageSeverity::Info, message.c_str());
+    }
+
     void WaitForFence(ID3D12Fence* fence, uint64_t value, HANDLE event)
     {
         // Test if the fence has been reached
@@ -88,6 +93,7 @@ namespace nvrhi::d3d12
         : m_Resources(m_Context, desc)
     {
         m_Context.device = desc.pDevice;
+        m_Context.logBufferLifetime = desc.logBufferLifetime;
         m_Context.messageCallback = desc.errorCB;
 
         if (desc.pGraphicsCommandQueue)
@@ -126,6 +132,11 @@ namespace nvrhi::d3d12
         if (SUCCEEDED(m_Context.device->QueryInterface(&m_Context.device2)) && hasOptions7)
         {
             m_MeshletsSupported = m_Options7.MeshShaderTier >= D3D12_MESH_SHADER_TIER_1;
+        }
+
+        if (SUCCEEDED(m_Context.device->QueryInterface(&m_Context.device8)) && hasOptions7)
+        {
+            m_SamplerFeedbackSupported = m_Options7.SamplerFeedbackTier >= D3D12_SAMPLER_FEEDBACK_TIER_0_9;
         }
 
         if (hasOptions6)
@@ -192,20 +203,54 @@ namespace nvrhi::d3d12
         if (m_NvapiIsInitialized)
         {
             NVAPI_D3D12_RAYTRACING_OPACITY_MICROMAP_CAPS caps = NVAPI_D3D12_RAYTRACING_OPACITY_MICROMAP_CAP_NONE;
-            NvAPI_D3D12_GetRaytracingCaps(m_Context.device5, NVAPI_D3D12_RAYTRACING_CAPS_TYPE_OPACITY_MICROMAP, &caps, sizeof(NVAPI_D3D12_RAYTRACING_OPACITY_MICROMAP_CAPS));
+            NvAPI_D3D12_GetRaytracingCaps(m_Context.device5, NVAPI_D3D12_RAYTRACING_CAPS_TYPE_OPACITY_MICROMAP, &caps, sizeof(caps));
             m_OpacityMicromapSupported = caps == NVAPI_D3D12_RAYTRACING_OPACITY_MICROMAP_CAP_STANDARD;
         }
+#endif
+#endif // #if NVRHI_WITH_NVAPI_OPACITY_MICROMAPS
 
-        if (m_OpacityMicromapSupported)
+#if NVRHI_WITH_NVAPI_CLUSTERS
+        if (m_NvapiIsInitialized)
+        {
+            NVAPI_D3D12_RAYTRACING_CLUSTER_OPERATIONS_CAPS clusterCaps = NVAPI_D3D12_RAYTRACING_CLUSTER_OPERATIONS_CAP_NONE;
+            NvAPI_D3D12_GetRaytracingCaps(m_Context.device5, NVAPI_D3D12_RAYTRACING_CAPS_TYPE_CLUSTER_OPERATIONS, &clusterCaps, sizeof(clusterCaps));
+            m_RayTracingClustersSupported = clusterCaps == NVAPI_D3D12_RAYTRACING_CLUSTER_OPERATIONS_CAP_STANDARD;
+        }
+#endif // #if NVRHI_WITH_NVAPI_CLUSTERS
+
+#if NVRHI_WITH_NVAPI_LSS
+        if (m_NvapiIsInitialized)
+        {
+            NVAPI_D3D12_RAYTRACING_LINEAR_SWEPT_SPHERES_CAPS lssCaps = NVAPI_D3D12_RAYTRACING_LINEAR_SWEPT_SPHERES_CAP_NONE;
+            NvAPI_D3D12_GetRaytracingCaps(m_Context.device5, NVAPI_D3D12_RAYTRACING_CAPS_TYPE_LINEAR_SWEPT_SPHERES, &lssCaps, sizeof(NVAPI_D3D12_RAYTRACING_LINEAR_SWEPT_SPHERES_CAPS));
+            m_LinearSweptSpheresSupported = lssCaps == NVAPI_D3D12_RAYTRACING_LINEAR_SWEPT_SPHERES_CAP_STANDARD;
+
+            NVAPI_D3D12_RAYTRACING_SPHERES_CAPS spheresCaps = NVAPI_D3D12_RAYTRACING_SPHERES_CAP_NONE;
+            NvAPI_D3D12_GetRaytracingCaps(m_Context.device5, NVAPI_D3D12_RAYTRACING_CAPS_TYPE_SPHERES, &spheresCaps, sizeof(NVAPI_D3D12_RAYTRACING_SPHERES_CAPS));
+            m_SpheresSupported = spheresCaps == NVAPI_D3D12_RAYTRACING_SPHERES_CAP_STANDARD;
+        }
+#endif // #if NVRHI_WITH_NVAPI_LSS
+
+#if NVRHI_WITH_NVAPI_OPACITY_MICROMAP || NVRHI_WITH_NVAPI_CLUSTERS || NVRHI_WITH_NVAPI_LSS
+        if (m_OpacityMicromapSupported || m_RayTracingClustersSupported || m_LinearSweptSpheresSupported || m_SpheresSupported)
         {
             NVAPI_D3D12_SET_CREATE_PIPELINE_STATE_OPTIONS_PARAMS params = {};
             params.version = NVAPI_D3D12_SET_CREATE_PIPELINE_STATE_OPTIONS_PARAMS_VER;
-            params.flags = NVAPI_D3D12_PIPELINE_CREATION_STATE_FLAGS_ENABLE_OMM_SUPPORT;
+            params.flags = 0;
+        #if NVRHI_WITH_NVAPI_OPACITY_MICROMAP
+            params.flags |= (m_OpacityMicromapSupported ? NVAPI_D3D12_PIPELINE_CREATION_STATE_FLAGS_ENABLE_OMM_SUPPORT : 0);
+        #endif
+        #if NVRHI_WITH_NVAPI_CLUSTERS
+            params.flags |= (m_RayTracingClustersSupported ? NVAPI_D3D12_PIPELINE_CREATION_STATE_FLAGS_ENABLE_CLUSTER_SUPPORT : 0);
+        #endif
+        #if NVRHI_WITH_NVAPI_LSS
+            params.flags |= (m_LinearSweptSpheresSupported ? NVAPI_D3D12_PIPELINE_CREATION_STATE_FLAGS_ENABLE_LSS_SUPPORT : 0);
+            params.flags |= (m_SpheresSupported ? NVAPI_D3D12_PIPELINE_CREATION_STATE_FLAGS_ENABLE_SPHERE_SUPPORT : 0);
+        #endif
             [[maybe_unused]] NvAPI_Status res = NvAPI_D3D12_SetCreatePipelineStateOptions(m_Context.device5, &params);
             assert(res == NVAPI_OK);
         }
 #endif
-#endif // #if NVRHI_WITH_NVAPI_OPACITY_MICROMAPS
 
 #endif // #if NVRHI_D3D12_WITH_NVAPI
 
@@ -226,6 +271,15 @@ namespace nvrhi::d3d12
             }
         }
 #endif
+
+        if (desc.enableHeapDirectlyIndexed)
+        {
+            D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_6 };
+            bool hasShaderModel = SUCCEEDED(m_Context.device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+
+            m_HeapDirectlyIndexedEnabled = m_Options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_3 && 
+                hasShaderModel && shaderModel.HighestShaderModel >= D3D_SHADER_MODEL_6_6;
+        }
     }
 
     Device::~Device()
@@ -328,6 +382,8 @@ namespace nvrhi::d3d12
             return Object(m_Context.device);
         case ObjectTypes::Nvrhi_D3D12_Device:
             return Object(this);
+        case ObjectTypes::D3D12_CommandQueue:
+            return Object(getQueue(CommandQueue::Graphics)->queue.Get());
         default:
             return nullptr;
         }
@@ -377,6 +433,101 @@ namespace nvrhi::d3d12
         assert(instanceID <= pExecutionQueue->lastSubmittedInstance);
 
         pWaitQueue->queue->Wait(pExecutionQueue->fence, instanceID);
+    }
+
+    void Device::getTextureTiling(ITexture* texture, uint32_t* numTiles, PackedMipDesc* desc, TileShape* tileShape, uint32_t* subresourceTilingsNum, SubresourceTiling* _subresourceTilings)
+    {
+        ID3D12Resource* resource = checked_cast<Texture*>(texture)->resource;
+        D3D12_RESOURCE_DESC resourceDesc = resource->GetDesc();
+
+        D3D12_PACKED_MIP_INFO packedMipDesc = {};
+        D3D12_TILE_SHAPE standardTileShapeForNonPackedMips = {};
+        D3D12_SUBRESOURCE_TILING subresourceTilings[16];
+
+        m_Context.device->GetResourceTiling(resource, numTiles, desc ? &packedMipDesc : nullptr, tileShape ? &standardTileShapeForNonPackedMips : nullptr, subresourceTilingsNum, 0, subresourceTilings);
+
+        if (desc)
+        {
+            desc->numStandardMips = packedMipDesc.NumStandardMips;
+            desc->numPackedMips = packedMipDesc.NumPackedMips;
+            desc->startTileIndexInOverallResource = packedMipDesc.StartTileIndexInOverallResource;
+            desc->numTilesForPackedMips = packedMipDesc.NumTilesForPackedMips;
+        }
+
+        if (tileShape)
+        {
+            tileShape->widthInTexels = standardTileShapeForNonPackedMips.WidthInTexels;
+            tileShape->heightInTexels = standardTileShapeForNonPackedMips.HeightInTexels;
+            tileShape->depthInTexels = standardTileShapeForNonPackedMips.DepthInTexels;
+        }
+
+        for (uint32_t i = 0; i < *subresourceTilingsNum; ++i)
+        {
+            _subresourceTilings[i].widthInTiles = subresourceTilings[i].WidthInTiles;
+            _subresourceTilings[i].heightInTiles = subresourceTilings[i].HeightInTiles;
+            _subresourceTilings[i].depthInTiles = subresourceTilings[i].DepthInTiles;
+            _subresourceTilings[i].startTileIndexInOverallResource = subresourceTilings[i].StartTileIndexInOverallResource;
+        }
+    }
+
+    void Device::updateTextureTileMappings(ITexture* _texture, const TextureTilesMapping* tileMappings, uint32_t numTileMappings, CommandQueue executionQueue)
+    {
+        Queue* queue = getQueue(executionQueue);
+        Texture* texture = checked_cast<Texture*>(_texture);
+
+        D3D12_TILE_SHAPE tileShape;
+        D3D12_SUBRESOURCE_TILING subresourceTiling;
+        m_Context.device->GetResourceTiling(texture->resource, nullptr, nullptr, &tileShape, nullptr, 0, &subresourceTiling);
+
+        for (size_t i = 0; i < numTileMappings; i++)
+        {
+            ID3D12Heap* heap = tileMappings[i].heap ? checked_cast<Heap*>(tileMappings[i].heap)->heap : nullptr;
+
+            uint32_t numRegions = tileMappings[i].numTextureRegions;
+            std::vector<D3D12_TILED_RESOURCE_COORDINATE> resourceCoordinates(numRegions);
+            std::vector<D3D12_TILE_REGION_SIZE> regionSizes(numRegions);
+            std::vector<D3D12_TILE_RANGE_FLAGS> rangeFlags(numRegions, heap ? D3D12_TILE_RANGE_FLAG_NONE : D3D12_TILE_RANGE_FLAG_NULL);
+            std::vector<UINT> heapStartOffsets(numRegions);
+            std::vector<UINT> rangeTileCounts(numRegions);
+
+            for (uint32_t j = 0; j < numRegions; ++j)
+            {
+                const TiledTextureCoordinate& tiledTextureCoordinate = tileMappings[i].tiledTextureCoordinates[j];
+                const TiledTextureRegion& tiledTextureRegion = tileMappings[i].tiledTextureRegions[j];
+
+                resourceCoordinates[j].Subresource = tiledTextureCoordinate.mipLevel * texture->desc.arraySize + tiledTextureCoordinate.arrayLevel;
+                resourceCoordinates[j].X = tiledTextureCoordinate.x;
+                resourceCoordinates[j].Y = tiledTextureCoordinate.y;
+                resourceCoordinates[j].Z = tiledTextureCoordinate.z;
+
+                if (tiledTextureRegion.tilesNum)
+                {
+                    regionSizes[j].NumTiles = tiledTextureRegion.tilesNum;
+                    regionSizes[j].UseBox = false;
+                }
+                else
+                {
+                    uint32_t tilesX = (tiledTextureRegion.width + (tileShape.WidthInTexels - 1)) / tileShape.WidthInTexels;
+                    uint32_t tilesY = (tiledTextureRegion.height + (tileShape.HeightInTexels - 1)) / tileShape.HeightInTexels;
+                    uint32_t tilesZ = (tiledTextureRegion.depth + (tileShape.DepthInTexels - 1)) / tileShape.DepthInTexels;
+
+                    regionSizes[j].Width = tilesX;
+                    regionSizes[j].Height = (uint16_t)tilesY;
+                    regionSizes[j].Depth = (uint16_t)tilesZ;
+
+                    regionSizes[j].NumTiles = tilesX * tilesY * tilesZ;
+                    regionSizes[j].UseBox = true;
+                }
+
+                // Offset in tiles
+                if (heap)
+                    heapStartOffsets[j] = (uint32_t)(tileMappings[i].byteOffsets[j] / D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
+
+                rangeTileCounts[j] = regionSizes[j].NumTiles;
+            }
+
+            queue->queue->UpdateTileMappings(texture->resource, tileMappings[i].numTextureRegions, resourceCoordinates.data(), regionSizes.data(), heap, numRegions, rangeFlags.data(), heap ? heapStartOffsets.data() : nullptr, rangeTileCounts.data(), D3D12_TILE_MAPPING_FLAG_NONE);
+        }
     }
 
     void Device::runGarbageCollection()
@@ -436,12 +587,18 @@ namespace nvrhi::d3d12
             return m_RayTracingSupported;
         case Feature::RayTracingOpacityMicromap:
             return m_OpacityMicromapSupported;
+        case Feature::RayTracingClusters:
+            return m_RayTracingClustersSupported;
         case Feature::RayQuery:
             return m_TraceRayInlineSupported;
         case Feature::FastGeometryShader:
             return m_FastGeometryShaderSupported;
         case Feature::ShaderExecutionReordering:
             return m_ShaderExecutionReorderingSupported;
+        case Feature::Spheres:
+            return m_SpheresSupported;
+        case Feature::LinearSweptSpheres:
+            return m_LinearSweptSpheresSupported;
         case Feature::Meshlets:
             return m_MeshletsSupported;
         case Feature::VariableRateShading:
@@ -466,6 +623,8 @@ namespace nvrhi::d3d12
             return true;
         case Feature::ConstantBufferRanges:
             return true;
+        case Feature::HeapDirectlyIndexed:
+            return m_HeapDirectlyIndexedEnabled;
         default:
             return false;
         }

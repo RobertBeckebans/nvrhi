@@ -237,7 +237,15 @@ namespace nvrhi::vulkan
 
     void CommandList::beginMarker(const char* name)
     {
-        if (m_Context.extensions.EXT_debug_marker)
+        if (m_Context.extensions.EXT_debug_utils)
+        {
+            assert(m_CurrentCmdBuf);
+
+            auto label = vk::DebugUtilsLabelEXT()
+                            .setPLabelName(name);
+            m_CurrentCmdBuf->cmdBuf.beginDebugUtilsLabelEXT(&label);
+        }
+        else if (m_Context.extensions.EXT_debug_marker)
         {
             assert(m_CurrentCmdBuf);
 
@@ -245,6 +253,7 @@ namespace nvrhi::vulkan
                                 .setPMarkerName(name);
             m_CurrentCmdBuf->cmdBuf.debugMarkerBeginEXT(&markerInfo);
         }
+        
 #if NVRHI_WITH_AFTERMATH
         if (m_Device->isAftermathEnabled())
         {
@@ -256,12 +265,19 @@ namespace nvrhi::vulkan
 
     void CommandList::endMarker()
     {
-        if (m_Context.extensions.EXT_debug_marker)
+        if (m_Context.extensions.EXT_debug_utils)
+        {
+            assert(m_CurrentCmdBuf);
+
+            m_CurrentCmdBuf->cmdBuf.endDebugUtilsLabelEXT();
+        }
+        else if (m_Context.extensions.EXT_debug_marker)
         {
             assert(m_CurrentCmdBuf);
 
             m_CurrentCmdBuf->cmdBuf.debugMarkerEndEXT();
         }
+        
 #if NVRHI_WITH_AFTERMATH
         m_AftermathTracker.popEvent();
 #endif
