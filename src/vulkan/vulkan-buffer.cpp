@@ -418,8 +418,6 @@ namespace nvrhi::vulkan
 
         assert(m_CurrentCmdBuf);
 
-        endRenderPass();
-
         m_CurrentCmdBuf->referencedResources.push_back(buffer);
 
         if (buffer->desc.isVolatile)
@@ -430,6 +428,10 @@ namespace nvrhi::vulkan
             
             return;
         }
+
+        // Per Vulkan spec, vkCmdUpdateBuffer is only allowed outside of a render pass, so end it here.
+        // Note that writeVolatileBuffer above is permitted so don't end the render pass for that case.
+        endRenderPass();
 
         const size_t vkCmdUpdateBufferLimit = 65536;
 
