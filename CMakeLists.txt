@@ -46,9 +46,12 @@ if (NVRHI_BUILD_SHARED)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if (MSVC)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     string(REGEX REPLACE "/W[0-4]\\s*" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     string(APPEND CMAKE_CXX_FLAGS " /W4 /MP")
+elseif(MSVC)
+    string(REGEX REPLACE "/W[0-4]\\s*" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(APPEND CMAKE_CXX_FLAGS " /W4")
 endif()
 
 
@@ -102,7 +105,7 @@ set(src_common
     src/common/aftermath.cpp)
 
 if(MSVC)
-    set(misc_common 
+    set(misc_common
         tools/nvrhi.natvis)
 else()
     set(misc_common "")
@@ -303,7 +306,7 @@ if (NVRHI_WITH_VULKAN)
         set_target_properties(${nvrhi_vulkan_target} PROPERTIES FOLDER "NVRHI")
         target_include_directories(${nvrhi_vulkan_target} PRIVATE include)
     endif()
-    
+
     if(WIN32)
         target_compile_definitions(${nvrhi_vulkan_target} PUBLIC VK_USE_PLATFORM_WIN32_KHR)
         target_compile_definitions(${nvrhi_vulkan_target} PRIVATE NOMINMAX)
@@ -363,8 +366,8 @@ if (NVRHI_INSTALL)
             NO_CHECK_REQUIRED_COMPONENTS_MACRO)
 
         write_basic_package_version_file(
-            src/nvrhiConfigVersion.cmake 
-            VERSION ${nvrhi_VERSION} 
+            src/nvrhiConfigVersion.cmake
+            VERSION ${nvrhi_VERSION}
             COMPATIBILITY ExactVersion)
 
         install(FILES
@@ -372,7 +375,7 @@ if (NVRHI_INSTALL)
             "${nvrhi_BINARY_DIR}/src/nvrhiConfigVersion.cmake"
             DESTINATION "${nvrhi_CONFIG_PATH}")
 
-        install(EXPORT "nvrhiTargets" 
+        install(EXPORT "nvrhiTargets"
             FILE "nvrhiTargets.cmake"
             EXPORT_LINK_INTERFACE_LIBRARIES
             DESTINATION "${nvrhi_CONFIG_PATH}")
